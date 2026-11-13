@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import type { Project } from "@/lib/api";
 
 function relativeTime(iso: string) {
@@ -19,22 +19,40 @@ type Props = {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onLogout: () => void;
+  onClose?: () => void;
 };
 
-export function ProjectRail({ projects, activeId, onSelect, onCreate, onLogout }: Props) {
+export function ProjectRail({
+  projects,
+  activeId,
+  onSelect,
+  onCreate,
+  onLogout,
+  onClose,
+}: Props) {
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-canvas">
+    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-line bg-canvas">
       <div className="flex h-12 items-center gap-2 px-4">
         <span className="grid size-[22px] place-items-center rounded-[7px] bg-ink text-[11px] font-semibold text-canvas">
           m
         </span>
         <span className="text-[13px] font-medium tracking-tight">mylovart</span>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭项目栏"
+            className="ml-auto grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink"
+          >
+            <X className="size-4" strokeWidth={1.75} />
+          </button>
+        )}
       </div>
 
       <button
         type="button"
         onClick={onCreate}
-        className="mx-3 mt-1 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[13px] text-muted transition-colors hover:bg-surface hover:text-ink"
+        className="mx-3 mt-1 flex h-9 items-center gap-2 rounded-lg px-2.5 text-[13px] text-muted transition-colors hover:bg-surface hover:text-ink lg:h-8"
       >
         <Plus className="size-3.5" strokeWidth={2} />
         新建项目
@@ -42,7 +60,7 @@ export function ProjectRail({ projects, activeId, onSelect, onCreate, onLogout }
 
       <div className="px-4 pt-6 pb-1.5 text-[11px] tracking-[0.08em] text-faint">项目</div>
 
-      <nav className="flex-1 overflow-y-auto px-2">
+      <nav className="flex-1 overflow-y-auto px-2 pb-2">
         {projects.length === 0 ? (
           <p className="px-2 py-1 text-[13px] leading-relaxed text-faint">
             还没有项目，点上面的「新建项目」开始。
@@ -55,12 +73,12 @@ export function ProjectRail({ projects, activeId, onSelect, onCreate, onLogout }
               onClick={() => onSelect(p.id)}
               className={
                 p.id === activeId
-                  ? "mb-0.5 flex w-full items-center gap-2 rounded-lg border border-line bg-surface px-2 py-[7px] text-left text-[13px]"
-                  : "mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-[7px] text-left text-[13px] text-muted transition-colors hover:bg-surface/70 hover:text-ink"
+                  ? "mb-0.5 flex w-full items-center gap-2 rounded-lg border border-line bg-surface px-2 py-2 text-left text-[13px] lg:py-[7px]"
+                  : "mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-muted transition-colors hover:bg-surface/70 hover:text-ink lg:py-[7px]"
               }
             >
               <span className="min-w-0 flex-1 truncate">{p.name}</span>
-              <span className="text-[11px] text-faint">
+              <span className="shrink-0 text-[11px] text-faint">
                 {p.isDraft ? "未保存" : relativeTime(p.updatedAt)}
               </span>
             </button>
@@ -71,7 +89,7 @@ export function ProjectRail({ projects, activeId, onSelect, onCreate, onLogout }
       <button
         type="button"
         onClick={onLogout}
-        className="flex items-center gap-2 border-t border-line px-3 py-3 text-left transition-colors hover:bg-surface"
+        className="flex items-center gap-2 border-t border-line px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] text-left transition-colors hover:bg-surface lg:pb-3"
       >
         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-[11px] font-medium text-accent">
           N

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536" viewBox="0 0 1024 1536" fill="none">
+  <rect width="1024" height="1536" fill="#f5f5f7"/>
+  <rect x="120" y="160" width="560" height="700" rx="280" fill="#e4e4e7"/>
+  <rect x="360" y="360" width="520" height="520" rx="260" fill="#1d1d1f"/>
+  <rect x="220" y="820" width="420" height="420" rx="210" fill="#ffffff" stroke="#d9d9de" stroke-width="2"/>
+  <text x="96" y="1410" fill="#1d1d1f" font-family="ui-sans-serif, system-ui, sans-serif" font-size="120" font-weight="300" letter-spacing="-4">STUDIO</text>
+  <text x="100" y="1490" fill="#6e6e73" font-family="ui-monospace, monospace" font-size="28" letter-spacing="8">OBJECTS / 04</text>
+</svg>

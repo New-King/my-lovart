@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#1d1d1f"/>
+      <stop offset="1" stop-color="#3a3a3a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#g)"/>
+  <path d="M0 360h1280M640 0v720" stroke="#ffffff" stroke-opacity=".12" stroke-width="2"/>
+  <circle cx="640" cy="360" r="150" stroke="#f5f5f7" stroke-width="2"/>
+  <text x="56" y="640" fill="#f5f5f7" font-family="ui-monospace, monospace" font-size="22" letter-spacing="10">MOTION STUDY</text>
+  <text x="56" y="680" fill="#86868b" font-family="ui-monospace, monospace" font-size="16" letter-spacing="6">MOCK / 15S</text>
+</svg>

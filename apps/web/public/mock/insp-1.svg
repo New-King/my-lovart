@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" fill="none">
+  <rect width="800" height="600" fill="#f5f5f7"/>
+  <rect x="64" y="64" width="672" height="472" fill="none" stroke="#1d1d1f" stroke-width="2"/>
+  <rect x="112" y="112" width="220" height="376" fill="#1d1d1f"/>
+  <rect x="372" y="112" width="316" height="170" fill="#e4e4e7"/>
+  <text x="380" y="390" fill="#1d1d1f" font-family="ui-sans-serif, system-ui, sans-serif" font-size="44" font-weight="300" letter-spacing="-2">Quiet</text>
+  <text x="380" y="440" fill="#6e6e73" font-family="ui-monospace, monospace" font-size="18" letter-spacing="6">EDITORIAL 01</text>
+</svg>

@@ -17,12 +17,22 @@ function sb(): SupabaseClient {
 const MESSAGES: Record<string, string> = {
   "Invalid login credentials": "邮箱或密码不正确",
   "Email not confirmed": "邮箱还没验证",
+  "Unable to validate email address: invalid format": "邮箱格式不正确",
 };
 
 export class AuthError extends Error {}
 
+// 测试期：短账号名自动补成 example.com，完整邮箱原样使用。
+function resolveLoginEmail(input: string) {
+  const value = input.trim().replace("＠", "@");
+  return value.includes("@") ? value : `${value}@example.com`;
+}
+
 export async function signIn(email: string, password: string) {
-  const { error } = await sb().auth.signInWithPassword({ email: email.trim(), password });
+  const { error } = await sb().auth.signInWithPassword({
+    email: resolveLoginEmail(email),
+    password,
+  });
   if (error) throw new AuthError(MESSAGES[error.message] ?? error.message);
 }
 

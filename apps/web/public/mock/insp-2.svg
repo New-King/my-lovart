@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" fill="none">
+  <rect width="800" height="600" fill="#ffffff"/>
+  <path d="M80 80h640v440H80zM80 220h640M80 380h640M293 80v440M506 80v440" stroke="#e4e4e7" stroke-width="2"/>
+  <rect x="96" y="96" width="180" height="108" fill="#1d1d1f"/>
+  <rect x="309" y="236" width="180" height="128" fill="#d9d9de"/>
+  <rect x="522" y="396" width="180" height="108" fill="#f0f0f2"/>
+  <text x="80" y="560" fill="#6e6e73" font-family="ui-monospace, monospace" font-size="18" letter-spacing="6">GRID / 02</text>
+</svg>

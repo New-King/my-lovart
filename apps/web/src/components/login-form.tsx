@@ -38,11 +38,12 @@ export function LoginForm() {
         </label>
         <input
           id="email"
-          type="email"
+          type="text"
+          inputMode="email"
           autoComplete="username"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="h-9 w-full rounded-lg border border-line bg-surface px-3 text-[13px] outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-accent/10"
+          className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-base outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-accent/10 lg:h-9 lg:text-[13px]"
         />
       </div>
 
@@ -56,7 +57,7 @@ export function LoginForm() {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="h-9 w-full rounded-lg border border-line bg-surface px-3 text-[13px] outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-accent/10"
+          className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-base outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-accent/10 lg:h-9 lg:text-[13px]"
         />
       </div>
 
@@ -65,7 +66,7 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={busy}
-        className="h-9 w-full rounded-lg bg-accent text-[13px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-60"
+        className="h-10 w-full rounded-lg bg-accent text-[13px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-60 lg:h-9"
       >
         {busy ? "登录中…" : "登录"}
       </button>

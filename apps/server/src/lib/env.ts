@@ -14,4 +14,7 @@ export const env = {
   projectsStore: (required("PROJECTS_STORE", "supabase") === "supabase" ? "supabase" : "memory") as
     | "supabase"
     | "memory",
+
+  // mock: 返回固定的图片/视频/灵感示例；llm: 走真实模型
+  agentMode: (required("AGENT_MODE", "mock") === "llm" ? "llm" : "mock") as "llm" | "mock",
 };

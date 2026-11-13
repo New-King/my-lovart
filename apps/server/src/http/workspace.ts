@@ -13,12 +13,16 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
     return service.get(request.params.projectId);
   });
 
-  app.put<{ Params: Params; Body: { elements?: unknown } }>(
+  app.put<{ Params: Params; Body: { elements?: unknown; files?: unknown } }>(
     "/workspace/:projectId/canvas",
     async (request, reply) => {
       try {
         await requireUserId(request);
-        service.saveCanvas(request.params.projectId, request.body?.elements ?? []);
+        service.saveCanvas(
+          request.params.projectId,
+          request.body?.elements ?? [],
+          request.body?.files,
+        );
         return reply.code(204).send();
       } catch (err) {
         if (err instanceof WorkspaceInputError) return reply.code(400).send({ error: err.message });

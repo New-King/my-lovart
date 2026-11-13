@@ -1,4 +1,6 @@
+import { env } from "../../lib/env.js";
 import { chat } from "../../lib/llm.js";
+import { buildMockReply } from "./mock-agent.js";
 import {
   MAX_CONTEXT_MESSAGES,
   appendMessage,
@@ -24,9 +26,12 @@ export function createWorkspaceService() {
       return getWorkspace(projectId);
     },
 
-    saveCanvas(projectId: string, elements: unknown): Workspace {
+    saveCanvas(projectId: string, elements: unknown, files?: unknown): Workspace {
       if (!Array.isArray(elements)) throw new WorkspaceInputError("elements 必须是数组");
-      return saveElements(projectId, elements);
+      if (files !== undefined && (typeof files !== "object" || files === null || Array.isArray(files))) {
+        throw new WorkspaceInputError("files 必须是对象");
+      }
+      return saveElements(projectId, elements, files as Record<string, unknown> | undefined);
     },
 
     async sendMessage(projectId: string, rawText: unknown): Promise<Workspace> {
@@ -35,6 +40,13 @@ export function createWorkspaceService() {
       if (text.length > MESSAGE_MAX) throw new WorkspaceInputError("消息过长");
 
       appendMessage(projectId, "user", text);
+
+      if (env.agentMode === "mock") {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        const reply = buildMockReply(text);
+        appendMessage(projectId, "assistant", reply.content, reply.blocks);
+        return getWorkspace(projectId);
+      }
 
       const workspace = getWorkspace(projectId);
       const history = workspace.messages

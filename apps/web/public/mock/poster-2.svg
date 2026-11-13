@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536" viewBox="0 0 1024 1536" fill="none">
+  <rect width="1024" height="1536" fill="#f5f5f7"/>
+  <rect x="96" y="96" width="120" height="1344" fill="#1d1d1f"/>
+  <path d="M300 96v1344M300 900h628" stroke="#d9d9de" stroke-width="2"/>
+  <circle cx="760" cy="420" r="140" fill="#d9d9de"/>
+  <text x="300" y="1180" fill="#1d1d1f" font-family="ui-sans-serif, system-ui, sans-serif" font-size="210" font-weight="300" letter-spacing="-10">FORM</text>
+  <text x="304" y="1290" fill="#6e6e73" font-family="ui-monospace, monospace" font-size="34" letter-spacing="14">STUDY / 02</text>
+</svg>
