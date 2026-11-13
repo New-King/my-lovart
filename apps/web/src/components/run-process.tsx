@@ -1,15 +1,16 @@
 "use client";
 
-import type { ChatMessage, RunStepStatus, ToolBlock } from "@my-lovart/shared";
+import type { ChatMessage, Thought, ToolBlock } from "@my-lovart/shared";
 import {
   AlertCircle,
-  Check,
   ChevronDown,
   Clapperboard,
   ImagePlus,
+  Lightbulb,
   Loader2,
   Search,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 const TOOL_ICONS = {
@@ -18,96 +19,97 @@ const TOOL_ICONS = {
   search_inspiration: Search,
 } as const;
 
-function formatElapsed(from: string, to: string): string {
-  const start = new Date(from).getTime();
-  const end = new Date(to).getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return "";
-  const seconds = Math.max(0, (end - start) / 1000);
+function formatDuration(start: string, end: string | undefined, now: number): string {
+  const from = new Date(start).getTime();
+  const to = end ? new Date(end).getTime() : now;
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return "";
+  const seconds = Math.max(0, (to - from) / 1000);
   if (seconds < 1) return "<1s";
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds % 60)}s`;
+  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-function StepIcon({ status }: { status: RunStepStatus }) {
-  if (status === "running") {
-    return <Loader2 className="mt-0.5 size-3 shrink-0 animate-spin text-ink" strokeWidth={2} />;
-  }
-  if (status === "failed") {
-    return <AlertCircle className="mt-0.5 size-3 shrink-0 text-danger" strokeWidth={2} />;
-  }
-  if (status === "done") {
-    return <Check className="mt-0.5 size-3 shrink-0 text-muted" strokeWidth={2.5} />;
-  }
-  return (
-    <span className="mt-[3px] size-2.5 shrink-0 rounded-full border border-line bg-canvas" />
-  );
-}
+type Entry =
+  | { kind: "thought"; id: string; at: string; thought: Thought }
+  | { kind: "tool"; id: string; at: string; tool: ToolBlock };
 
-function ProgressBar({ value }: { value: number }) {
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <div className="h-1 w-28 overflow-hidden rounded-full bg-line">
-        <div
-          className="h-full rounded-full bg-ink transition-[width] duration-300 ease-out"
-          style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
-        />
-      </div>
-      <span className="font-mono text-[9.5px] tabular-nums text-faint">{Math.round(value)}%</span>
-    </div>
-  );
-}
-
-function ToolRow({ tool }: { tool: ToolBlock }) {
-  const Icon = TOOL_ICONS[tool.tool] ?? ImagePlus;
-  const live = tool.status === "running" || tool.status === "queued";
+function ThoughtRow({ thought, now }: { thought: Thought; now: number }) {
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="mt-2 rounded-lg border border-line/70 bg-canvas/60 px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[11px]">
-        <Icon className="size-3.5 shrink-0 text-faint" strokeWidth={1.75} />
-        <span className="min-w-0 truncate font-medium text-muted">{tool.title}</span>
-        {tool.stage && <span className="shrink-0 text-faint">{tool.stage}</span>}
-        <span className="ml-auto shrink-0">
-          {tool.status === "failed" ? (
-            <AlertCircle className="size-3 text-danger" strokeWidth={2} />
-          ) : tool.status === "done" ? (
-            <Check className="size-3 text-faint" strokeWidth={2.5} />
-          ) : (
-            <Loader2 className="size-3 animate-spin text-faint" strokeWidth={2} />
-          )}
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-muted transition-colors hover:text-ink"
+      >
+        <Lightbulb className="size-3 shrink-0 text-faint" strokeWidth={1.75} />
+        <span className="shrink-0">思考过程</span>
+        <span className="shrink-0 text-faint">
+          · {formatDuration(thought.startedAt, thought.finishedAt, now)}
         </span>
-      </div>
-
-      {live && <ProgressBar value={tool.progress ?? 0} />}
-      {!live && tool.detail && (
-        <p className="mt-0.5 pl-[22px] text-[10px] text-faint">{tool.detail}</p>
+        <ChevronDown
+          className={`ml-auto size-3 shrink-0 text-faint transition-transform ${
+            expanded ? "" : "-rotate-90"
+          }`}
+          strokeWidth={1.75}
+        />
+      </button>
+      {expanded && (
+        <p className="mb-2 ml-5 whitespace-pre-wrap text-[11px] leading-relaxed text-muted">
+          {thought.text || "—"}
+        </p>
       )}
     </div>
   );
 }
 
-function Thinking({ text }: { text: string }) {
+function ToolRow({ tool, now }: { tool: ToolBlock; now: number }) {
   const [expanded, setExpanded] = useState(false);
-  const long = text.length > 42;
+  const Icon = TOOL_ICONS[tool.tool] ?? ImagePlus;
+  const live = tool.status === "running" || tool.status === "queued";
+  const failed = tool.status === "failed";
 
   return (
-    <div className="mt-2 border-t border-line/70 pt-2">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-1.5 text-left text-[10px] text-faint transition-colors hover:text-muted"
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-muted transition-colors hover:text-ink"
       >
-        <span>思考过程</span>
-        {long && <span className="text-[9.5px]">{expanded ? "收起" : "展开"}</span>}
+        <Icon
+          className={`size-3 shrink-0 ${failed ? "text-danger" : "text-faint"}`}
+          strokeWidth={1.75}
+        />
+        <span className="shrink-0">{tool.title}</span>
+        <span className="min-w-0 flex-1 truncate text-faint">· {tool.detail}</span>
+        {live ? (
+          <Loader2 className="size-3 shrink-0 animate-spin text-faint" strokeWidth={2} />
+        ) : (
+          <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-faint">
+            {tool.startedAt
+              ? formatDuration(tool.startedAt, tool.finishedAt, now)
+              : ""}
+          </span>
+        )}
+        <ChevronDown
+          className={`size-3 shrink-0 text-faint transition-transform ${
+            expanded ? "" : "-rotate-90"
+          }`}
+          strokeWidth={1.75}
+        />
       </button>
-      <p
-        className={`mt-1 text-[11px] leading-relaxed text-muted ${
-          expanded ? "" : "line-clamp-2"
-        }`}
-      >
-        {text}
-      </p>
+      {expanded && (
+        <p
+          className={`mb-2 ml-5 break-words text-[10.5px] leading-relaxed ${
+            failed ? "text-danger" : "text-faint"
+          }`}
+        >
+          {tool.detail || "—"}
+        </p>
+      )}
     </div>
   );
 }
@@ -119,13 +121,10 @@ export function RunProcess({ message }: { message: ChatMessage }) {
   const tools = (message.blocks ?? []).filter(
     (block): block is ToolBlock => block.type === "tool",
   );
+  const thoughts = message.thoughts ?? [];
 
-  const [open, setOpen] = useState(live);
+  const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    setOpen(live);
-  }, [live]);
 
   useEffect(() => {
     if (!live) return;
@@ -133,104 +132,124 @@ export function RunProcess({ message }: { message: ChatMessage }) {
     return () => window.clearInterval(timer);
   }, [live]);
 
-  if (steps.length === 0 && tools.length === 0 && message.status !== "queued") return null;
+  if (
+    thoughts.length === 0 &&
+    tools.length === 0 &&
+    message.status !== "queued"
+  ) {
+    return null;
+  }
 
-  const doneCount = steps.filter((step) => step.status === "done").length;
-  const lastFinished = steps.reduce<string | undefined>(
-    (acc, step) =>
-      step.finishedAt && (!acc || step.finishedAt > acc) ? step.finishedAt : acc,
-    undefined,
+  const runningTool = tools.find(
+    (tool) => tool.status === "running" || tool.status === "queued",
   );
-  const endedAt = message.updatedAt ?? lastFinished ?? message.createdAt;
-  const elapsed = formatElapsed(
-    message.createdAt,
-    live ? new Date(now).toISOString() : endedAt,
-  );
-  const orphanTools = tools.filter((tool) => !tool.stepId || !steps.some((s) => s.id === tool.stepId));
+  const runningStep = [...steps].reverse().find((step) => step.status === "running");
 
   const title =
     message.status === "queued"
       ? message.queuePosition !== undefined && message.queuePosition > 0
         ? `排队中 · 第 ${message.queuePosition + 1} 位`
         : "排队中"
-      : live
-        ? "生成中"
-        : failed
-          ? "生成失败"
-          : message.status === "canceled"
-            ? "已停止"
-            : "生成过程";
+      : failed
+        ? "生成失败"
+        : message.status === "canceled"
+          ? "已停止"
+          : live
+            ? runningTool
+              ? `正在${runningTool.title}`
+              : runningStep
+                ? `正在${runningStep.title}`
+                : "思考中"
+            : "思考过程";
+
+  const total = formatDuration(
+    message.createdAt,
+    live ? undefined : (message.updatedAt ?? message.createdAt),
+    now,
+  );
+
+  const entries: Entry[] = [
+    ...thoughts.map<Entry>((thought) => ({
+      kind: "thought",
+      id: thought.id,
+      at: thought.startedAt,
+      thought,
+    })),
+    ...tools.map<Entry>((tool) => ({
+      kind: "tool",
+      id: tool.id,
+      at: tool.startedAt ?? message.createdAt,
+      tool,
+    })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
 
   return (
-    <section className="overflow-hidden rounded-xl border border-line bg-surface/60">
+    <section>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="flex w-full items-center gap-2 py-0.5 text-left text-[11.5px] text-muted transition-colors hover:text-ink"
       >
-        {live ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted" strokeWidth={2} />
-        ) : failed ? (
-          <AlertCircle className="size-3 shrink-0 text-danger" strokeWidth={2} />
-        ) : (
-          <Check className="size-3 shrink-0 text-muted" strokeWidth={2.5} />
-        )}
-        <span className="text-[11.5px] font-medium text-muted">{title}</span>
-        <span className="ml-auto shrink-0 font-mono text-[9.5px] tabular-nums text-faint">
-          {steps.length > 0 ? `${doneCount}/${steps.length} 步 · ` : ""}
-          {elapsed}
+        <span className="grid size-3.5 shrink-0 place-items-center">
+          {live ? (
+            <Loader2 className="size-3 animate-spin text-muted" strokeWidth={2} />
+          ) : failed ? (
+            <AlertCircle className="size-3 text-danger" strokeWidth={2} />
+          ) : (
+            <Lightbulb className="size-3 text-faint" strokeWidth={1.75} />
+          )}
         </span>
+
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={title}
+            initial={{ opacity: 0, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -3 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="truncate"
+          >
+            {title}
+          </motion.span>
+        </AnimatePresence>
+
+        <span className="shrink-0 text-faint">· {total}</span>
         <ChevronDown
-          className={`size-3.5 shrink-0 text-faint transition-transform ${open ? "" : "-rotate-90"}`}
+          className={`ml-auto size-3.5 shrink-0 text-faint transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
           strokeWidth={1.75}
         />
       </button>
 
-      {open && (
-        <div className="border-t border-line px-3 py-2.5">
-          {steps.length === 0 && tools.length === 0 && message.status === "queued" && (
-            <p className="py-0.5 text-[10.5px] text-faint">正在排队，轮到时自动开始…</p>
-          )}
-          {steps.length > 0 && (
-            <ol className="space-y-2.5">
-              {steps.map((step) => {
-                const stepTools = tools.filter((tool) => tool.stepId === step.id);
-                return (
-                  <li key={step.id}>
-                    <div className="flex items-start gap-2">
-                      <StepIcon status={step.status} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[11.5px] leading-tight text-ink">{step.title}</p>
-                        {step.detail && (
-                          <p className="mt-0.5 break-words text-[10px] leading-relaxed text-faint">
-                            {step.detail}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {stepTools.map((tool) => (
-                      <div key={tool.id} className="pl-5">
-                        <ToolRow tool={tool} />
-                      </div>
-                    ))}
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-
-          {orphanTools.length > 0 && (
-            <div className={steps.length > 0 ? "mt-2.5" : ""}>
-              {orphanTools.map((tool) => (
-                <ToolRow key={tool.id} tool={tool} />
-              ))}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            <div className="mt-1.5 border-l border-line pl-3">
+              {entries.length === 0 ? (
+                <p className="py-1 text-[10.5px] text-faint">
+                  {message.status === "queued" ? "正在排队，轮到时自动开始…" : "暂无过程记录"}
+                </p>
+              ) : (
+                entries.map((entry) =>
+                  entry.kind === "thought" ? (
+                    <ThoughtRow key={`t-${entry.id}`} thought={entry.thought} now={now} />
+                  ) : (
+                    <ToolRow key={`s-${entry.id}`} tool={entry.tool} now={now} />
+                  ),
+                )
+              )}
             </div>
-          )}
-
-          {message.thinking && <Thinking text={message.thinking} />}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

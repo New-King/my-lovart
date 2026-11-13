@@ -17,14 +17,16 @@ import {
   appendDelta,
   appendMessage,
   appendStep,
-  appendThinking,
+  appendThoughtDelta,
   ensureWorkspace,
   finishMessage,
+  finishThought,
   getWorkspace,
   markRunning,
   saveElements,
   setQueuePosition,
   startAssistantMessage,
+  startThought,
   updateStep,
   updateToolProgress,
   updateToolStatus,
@@ -263,8 +265,18 @@ function applyEvent(projectId: string, messageId: string, event: RunEvent): void
         at: event.at,
       });
       return;
+    case "thinking.started":
+      startThought(projectId, messageId, {
+        id: event.thoughtId,
+        text: "",
+        startedAt: event.startedAt,
+      });
+      return;
     case "thinking.delta":
-      appendThinking(projectId, messageId, event.delta, event.at);
+      appendThoughtDelta(projectId, messageId, event.thoughtId, event.delta, event.at);
+      return;
+    case "thinking.completed":
+      finishThought(projectId, messageId, event.thoughtId, event.at);
       return;
     case "message.delta":
       appendDelta(projectId, messageId, event.delta, event.at);

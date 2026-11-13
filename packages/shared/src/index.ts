@@ -22,9 +22,12 @@ export type ToolBlock = {
   detail?: string;
   /** 关联到哪一步；界面用它把工具挂在对应步骤下 */
   stepId?: string;
-  /** 0–100，真实任务只有这个粒度 */
+  startedAt?: string;
+  finishedAt?: string;
+  aspectRatio?: AspectRatio;
+  /** 0–100，内部用于骨架阶段判断；界面不显示文字 */
   progress?: number;
-  /** 排队中 / 扩散中 / 编码中 这类人话阶段 */
+  /** 排队中 / 扩散中 / 编码中 这类机器阶段，仅日志用 */
   stage?: string;
 };
 
@@ -115,6 +118,14 @@ export type RunError = {
   retriable: boolean;
 };
 
+/** 一次运行里的一段思考；长任务会有多段，不是一份。 */
+export type Thought = {
+  id: string;
+  text: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -130,8 +141,8 @@ export type ChatMessage = {
   steps?: RunStep[];
   /** 排队时在队列里的位置，0 表示即将开始 */
   queuePosition?: number;
-  /** 思考过程的增量拼接结果 */
-  thinking?: string;
+  /** 多段思考，按开始时间排序 */
+  thoughts?: Thought[];
   attachments?: ChatAttachment[];
   blocks?: ChatBlock[];
 };
@@ -171,7 +182,13 @@ export type RunEvent =
       status?: RunStepStatus;
       detail?: string;
     })
-  | (RunEventBase & { type: "thinking.delta"; delta: string })
+  | (RunEventBase & {
+      type: "thinking.started";
+      thoughtId: string;
+      startedAt: string;
+    })
+  | (RunEventBase & { type: "thinking.delta"; thoughtId: string; delta: string })
+  | (RunEventBase & { type: "thinking.completed"; thoughtId: string })
   | (RunEventBase & { type: "message.delta"; delta: string })
   | (RunEventBase & { type: "tool.started"; tool: ToolBlock })
   | (RunEventBase & {

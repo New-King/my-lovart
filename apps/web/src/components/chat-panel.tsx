@@ -1,6 +1,11 @@
 "use client";
 
-import type { AspectRatio, GenerateRequest, ImageBlock } from "@my-lovart/shared";
+import type {
+  AspectRatio,
+  GenerateRequest,
+  ImageBlock,
+  ToolBlock,
+} from "@my-lovart/shared";
 import { ArrowDown, Copy, Frame, Menu, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
@@ -18,6 +23,7 @@ import { ChatBlocks } from "./chat-blocks";
 import { ChatComposer, type ChatComposerHandle } from "./chat-composer";
 import { ChatEmptyState } from "./chat-empty-state";
 import { ImageLightbox } from "./image-lightbox";
+import { MediaSkeleton } from "./media-skeleton";
 import { RunProcess } from "./run-process";
 import { useToast } from "./ui/toast";
 
@@ -28,7 +34,6 @@ type Props = {
   loadingError: string | null;
   onReload: () => void;
   sending: boolean;
-  error: string | null;
   onCreate: () => void;
   onSend: (
     text: string,
@@ -65,6 +70,23 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function ActiveMediaSkeleton({ message }: { message: ChatMessage }) {
+  const tool = message.blocks?.find(
+    (block): block is ToolBlock =>
+      block.type === "tool" &&
+      (block.tool === "generate_image" || block.tool === "generate_video") &&
+      (block.status === "running" || block.status === "queued"),
+  );
+  if (!tool) return null;
+
+  return (
+    <MediaSkeleton
+      kind={tool.tool === "generate_video" ? "video" : "image"}
+      {...(tool.aspectRatio ? { aspectRatio: tool.aspectRatio } : {})}
+    />
+  );
+}
+
 export function ChatPanel({
   project,
   messages,
@@ -72,7 +94,6 @@ export function ChatPanel({
   loadingError,
   onReload,
   sending,
-  error,
   onCreate,
   onSend,
   onStop,
@@ -104,10 +125,25 @@ export function ChatPanel({
   const scrollToBottom = (smooth: boolean) => {
     const list = listRef.current;
     if (!list) return;
-    list.scrollTo({ top: list.scrollHeight, behavior: smooth ? "smooth" : "auto" });
     nearBottomRef.current = true;
     setShowJump(false);
+    window.requestAnimationFrame(() => {
+      list.scrollTo({ top: list.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    });
   };
+
+  // 切换项目时重置贴底状态，等 DOM 画完再滚，避免停在顶部
+  useEffect(() => {
+    nearBottomRef.current = true;
+    setShowJump(false);
+    const timer = window.setTimeout(() => scrollToBottom(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (loading) return;
+    scrollToBottom(false);
+  }, [loading]);
 
   useEffect(() => {
     if (!nearBottomRef.current) {
@@ -219,7 +255,7 @@ export function ChatPanel({
             if (!list) return;
             const near = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
             nearBottomRef.current = near;
-            if (near) setShowJump(false);
+            setShowJump(!near);
           }}
           className="h-full overflow-y-auto px-4 py-5"
         >
@@ -290,6 +326,8 @@ export function ChatPanel({
                         )}
                       </div>
                     )}
+
+                    <ActiveMediaSkeleton message={message} />
 
                     {message.blocks && message.blocks.length > 0 && (
                       <ChatBlocks
@@ -366,7 +404,6 @@ export function ChatPanel({
         key={project?.id ?? "no-project"}
         disabled={!project || loading}
         sending={sending}
-        error={error}
         placeholder={
           project
             ? sending

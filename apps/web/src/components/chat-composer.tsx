@@ -25,7 +25,6 @@ export type ChatComposerHandle = {
 type Props = {
   disabled: boolean;
   sending: boolean;
-  error: string | null;
   placeholder: string;
   projectImages: ReferenceItem[];
   onOpenMaterials: () => void;
@@ -79,7 +78,7 @@ function ReferenceRow({
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatComposer(
-  { disabled, sending, error, placeholder, projectImages, onOpenMaterials, onSend, onStop },
+  { disabled, sending, placeholder, projectImages, onOpenMaterials, onSend, onStop },
   ref,
 ) {
   const [text, setText] = useState("");
@@ -267,8 +266,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
       className="relative shrink-0 border-t border-line p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:pb-3"
       onKeyDown={(event) => event.stopPropagation()}
     >
-      {error && <p className="mb-2 px-1 text-[11px] text-danger">{error}</p>}
-
       <div
         className="relative rounded-2xl border border-line bg-surface shadow-[0_10px_32px_-28px_rgba(24,24,27,0.45)] transition-[border-color,box-shadow] focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/10"
         onDragEnter={handleDragEnter}

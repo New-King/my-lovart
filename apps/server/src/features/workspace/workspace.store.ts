@@ -6,6 +6,7 @@ import type {
   RunError,
   RunStep,
   RunStepStatus,
+  Thought,
   ToolBlock,
 } from "@my-lovart/shared";
 
@@ -125,15 +126,37 @@ export function appendDelta(
   touch(message, at);
 }
 
-export function appendThinking(
+export function startThought(projectId: string, messageId: string, thought: Thought): void {
+  const message = findMessage(projectId, messageId);
+  if (!message) return;
+  if (!message.thoughts) message.thoughts = [];
+  message.thoughts.push(thought);
+}
+
+export function appendThoughtDelta(
   projectId: string,
   messageId: string,
+  thoughtId: string,
   delta: string,
   at: string,
 ): void {
   const message = findMessage(projectId, messageId);
-  if (!message || !delta) return;
-  message.thinking = (message.thinking ?? "") + delta;
+  const thought = message?.thoughts?.find((item) => item.id === thoughtId);
+  if (!message || !thought || !delta) return;
+  thought.text += delta;
+  touch(message, at);
+}
+
+export function finishThought(
+  projectId: string,
+  messageId: string,
+  thoughtId: string,
+  at: string,
+): void {
+  const message = findMessage(projectId, messageId);
+  const thought = message?.thoughts?.find((item) => item.id === thoughtId);
+  if (!message || !thought) return;
+  thought.finishedAt = at;
   touch(message, at);
 }
 
@@ -210,6 +233,7 @@ export function updateToolStatus(
   tool.status = status;
   if (detail !== undefined) tool.detail = detail;
   if (status === "done") tool.progress = 100;
+  if (status === "done" || status === "failed") tool.finishedAt = at;
   touch(message, at);
 }
 
@@ -239,6 +263,9 @@ export function finishMessage(
       step.status = status === "completed" ? "done" : "failed";
       step.finishedAt = at;
     }
+  }
+  for (const thought of message.thoughts ?? []) {
+    if (!thought.finishedAt) thought.finishedAt = at;
   }
 }
 

@@ -76,6 +76,9 @@
 
 /* 聊天里的 Markdown */
 @layer components {
+  .media-shimmer {
+    animation: media-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
   .prose-muse > * + * {
     margin-top: 0.7em;
   }
@@ -140,5 +143,44 @@
   .prose-muse a {
     color: var(--color-accent);
     text-decoration: underline;
+  }
+}
+
+@keyframes media-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.toast-enter {
+  animation: toast-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast-leave {
+  animation: toast-out 180ms ease-in both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(12px);
   }
 }

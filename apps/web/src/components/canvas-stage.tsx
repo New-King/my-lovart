@@ -2,9 +2,7 @@
 
 import dynamic from "next/dynamic";
 import {
-  AlertCircle,
   BookOpen,
-  Check,
   Download,
   Loader2,
   Menu,
@@ -28,6 +26,7 @@ import {
   type ChatImageDragPayload,
 } from "@/lib/chat-canvas-drag";
 import type { Project } from "@/lib/api";
+import { useToast } from "./ui/toast";
 
 const Excalidraw = dynamic(() => import("@excalidraw/excalidraw").then((m) => m.Excalidraw), {
   ssr: false,
@@ -56,8 +55,6 @@ export type CanvasStageHandle = {
   }) => Promise<void>;
 };
 
-type Toast = { kind: "success" | "error"; text: string };
-
 function waitAtLeast(start: number, ms: number) {
   const remaining = ms - (Date.now() - start);
   return remaining > 0 ? new Promise((resolve) => setTimeout(resolve, remaining)) : Promise.resolve();
@@ -83,9 +80,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(0);
-  const [toast, setToast] = useState<Toast | null>(null);
+  const showToast = useToast();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragDepth = useRef(0);
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const hydrated = useRef(false);
@@ -97,14 +93,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     return () => {
       alive.current = false;
       if (timer.current) clearTimeout(timer.current);
-      if (toastTimer.current) clearTimeout(toastTimer.current);
     };
-  }, []);
-
-  const showToast = useCallback((kind: Toast["kind"], text: string) => {
-    setToast({ kind, text });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
   const handleApi = useCallback(
@@ -427,27 +416,10 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           </div>
         )}
 
-        {(busy > 0 || toast) && (
-          <div
-            className={`pointer-events-none absolute left-1/2 top-14 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-surface/95 px-3 py-1.5 text-[11px] shadow-[0_8px_30px_-12px_rgba(24,24,27,0.25)] ${
-              toast?.kind === "error" && busy === 0 ? "text-danger" : "text-muted"
-            }`}
-          >
-            {busy > 0 ? (
-              <>
-                <Loader2 className="size-3 animate-spin" strokeWidth={2} />
-                正在上传图片…
-              </>
-            ) : toast ? (
-              <>
-                {toast.kind === "success" ? (
-                  <Check className="size-3" strokeWidth={2} />
-                ) : (
-                  <AlertCircle className="size-3" strokeWidth={2} />
-                )}
-                {toast.text}
-              </>
-            ) : null}
+        {(busy > 0) && (
+          <div className="pointer-events-none absolute left-1/2 top-14 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-surface/95 px-3 py-1.5 text-[11px] text-muted shadow-[0_8px_30px_-12px_rgba(24,24,27,0.25)]">
+            <Loader2 className="size-3 animate-spin" strokeWidth={2} />
+            正在处理图片…
           </div>
         )}
       </div>

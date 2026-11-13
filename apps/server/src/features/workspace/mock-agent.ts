@@ -121,17 +121,28 @@ function textForInspiration(): string {
   return "找了几张同类方向的参考：构图偏中心、低饱和、文字少。可以挑一张作为整体基调，我再按它出一版。";
 }
 
-function thinkingFor(kind: "image" | "video" | "inspiration", input: MockRunInput): string {
+function thoughtFor(
+  kind: "image" | "video" | "inspiration",
+  input: MockRunInput,
+  phase: "understand" | "plan",
+): string {
+  if (phase === "understand") {
+    if (kind === "inspiration") {
+      return "用户要的是方向，不是成品；先按低饱和、编辑感、少文字筛参考。";
+    }
+    if (input.attachments.length > 0) {
+      return "参考图里能复用的信息是配色和留白比例，构图需要重做，避免直接拼贴。";
+    }
+    return "先把主体和主色定下来，再补细节；比例按用户选的来。";
+  }
+
   if (kind === "video") {
-    return "先确认节奏和镜头数，再决定每个镜头的运动方向；生成参数按 16:9、15 秒处理。";
+    return "节奏按 15 秒、6 个镜头走，慢起快切，最后一个镜头定格。";
   }
   if (kind === "inspiration") {
-    return "用户要的是方向，不是成品；先按低饱和、编辑感、少文字筛参考。";
+    return "四张参考已经够覆盖方向，收回来的结果按构图相似度排序。";
   }
-  if (input.attachments.length > 0) {
-    return "参考图里能复用的信息是配色和留白比例，构图需要重做，避免直接拼贴。";
-  }
-  return "先把构图和主色定下来，再补细节；比例按用户选的来。";
+  return "中心构图更稳，标题压在下三分之一，留白比例大约 3:2。";
 }
 
 /**
@@ -182,12 +193,19 @@ export async function* createMockRun(input: MockRunInput): AsyncGenerator<RunEve
   );
   yield emit({ type: "step.started", step: understand });
 
-  for (const chunk of chunkText(thinkingFor(mode, input))) {
+  const firstThoughtId = randomUUID();
+  yield emit({
+    type: "thinking.started",
+    thoughtId: firstThoughtId,
+    startedAt: new Date().toISOString(),
+  });
+  for (const chunk of chunkText(thoughtFor(mode, input, "understand"))) {
     if (signal.aborted) break;
-    yield emit({ type: "thinking.delta", delta: chunk });
+    yield emit({ type: "thinking.delta", thoughtId: firstThoughtId, delta: chunk });
     await sleep(35, signal);
   }
-  await sleep(180, signal);
+  yield emit({ type: "thinking.completed", thoughtId: firstThoughtId });
+  await sleep(140, signal);
   if (signal.aborted) {
     yield emit({ type: "step.updated", stepId: understand.id, status: "failed", detail: "已停止" });
     yield emit({ type: "run.canceled" });
@@ -207,6 +225,20 @@ export async function* createMockRun(input: MockRunInput): AsyncGenerator<RunEve
     undefined,
   );
   yield emit({ type: "step.started", step: plan });
+
+  const secondThoughtId = randomUUID();
+  yield emit({
+    type: "thinking.started",
+    thoughtId: secondThoughtId,
+    startedAt: new Date().toISOString(),
+  });
+  for (const chunk of chunkText(thoughtFor(mode, input, "plan"))) {
+    if (signal.aborted) break;
+    yield emit({ type: "thinking.delta", thoughtId: secondThoughtId, delta: chunk });
+    await sleep(38, signal);
+  }
+  yield emit({ type: "thinking.completed", thoughtId: secondThoughtId });
+
   await sleep(isVideo ? 480 : 360, signal);
   if (signal.aborted) {
     yield emit({ type: "step.updated", stepId: plan.id, status: "failed", detail: "已停止" });
@@ -259,6 +291,8 @@ export async function* createMockRun(input: MockRunInput): AsyncGenerator<RunEve
     title: mode === "inspiration" ? "搜索灵感" : isVideo ? "生成视频" : "生成图像",
     detail: `${size.width} × ${size.height} · ${ratio} · ${model}`,
     stepId: generate.id,
+    startedAt: new Date().toISOString(),
+    aspectRatio: ratio,
     progress: 0,
     stage: "排队中",
   };

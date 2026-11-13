@@ -48,6 +48,9 @@ function cancelLocal(message: ChatMessage): ChatMessage {
         ? { ...block, status: "failed" as const }
         : block,
     ),
+    thoughts: (message.thoughts ?? []).map((thought) =>
+      thought.finishedAt ? thought : { ...thought, finishedAt: new Date().toISOString() },
+    ),
   };
 }
 
@@ -109,11 +112,32 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
             : step,
         ),
       }));
+    case "thinking.started":
+      return patch((message) => ({
+        ...message,
+        updatedAt: at,
+        thoughts: [
+          ...(message.thoughts ?? []),
+          { id: event.thoughtId, text: "", startedAt: event.startedAt },
+        ],
+      }));
     case "thinking.delta":
       return patch((message) => ({
         ...message,
         updatedAt: at,
-        thinking: (message.thinking ?? "") + event.delta,
+        thoughts: (message.thoughts ?? []).map((thought) =>
+          thought.id === event.thoughtId
+            ? { ...thought, text: thought.text + event.delta }
+            : thought,
+        ),
+      }));
+    case "thinking.completed":
+      return patch((message) => ({
+        ...message,
+        updatedAt: at,
+        thoughts: (message.thoughts ?? []).map((thought) =>
+          thought.id === event.thoughtId ? { ...thought, finishedAt: at } : thought,
+        ),
       }));
     case "message.delta":
       return patch((message) => ({
@@ -152,6 +176,7 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
                 ...block,
                 status: "done" as const,
                 progress: 100,
+                finishedAt: at,
                 ...(event.outputSummary !== undefined
                   ? { detail: event.outputSummary }
                   : {}),
@@ -165,7 +190,7 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         updatedAt: at,
         blocks: (message.blocks ?? []).map((block) =>
           block.type === "tool" && block.id === event.toolCallId
-            ? { ...block, status: "failed" as const, detail: event.error.message }
+            ? { ...block, status: "failed" as const, detail: event.error.message, finishedAt: at }
             : block,
         ),
       }));
@@ -210,7 +235,6 @@ export function Workspace() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [data, setData] = useState<WorkspaceData | null>(null);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"chat" | "canvas">("chat");
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [materialPanel, setMaterialPanel] = useState<"manage" | "select" | null>(null);
@@ -311,15 +335,18 @@ export function Workspace() {
       const controller = new AbortController();
       abortRef.current = controller;
       setRunning(true);
-      setError(null);
+      let sawAccepted = false;
       try {
-        await invoke(handleEvent, controller.signal);
+        await invoke((event) => {
+          if (event.type === "run.accepted") sawAccepted = true;
+          handleEvent(event);
+        }, controller.signal);
         return { ok: true };
       } catch (err) {
         if (controller.signal.aborted) return { ok: true };
         const message = err instanceof Error ? err.message : "生成失败";
-        setError(message);
-        toast("error", message);
+        // 已经进入运行的消息用消息内的失败卡片提示，避免和 toast 重复
+        if (!sawAccepted) toast("error", message);
         return { ok: false };
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
@@ -417,8 +444,6 @@ export function Workspace() {
     const prompt = trimmed || (attachments.length > 0 ? IMAGE_ONLY_PROMPT : "");
     if (!prompt) return false;
 
-    setError(null);
-
     const optimistic: ChatMessage = {
       id: `local-${Date.now()}`,
       role: "user",
@@ -467,7 +492,6 @@ export function Workspace() {
           : prev,
       );
       const message = err instanceof Error ? err.message : "发送失败";
-      setError(message);
       toast("error", message);
       return false;
     }
@@ -498,7 +522,6 @@ export function Workspace() {
       toast("info", "正在生成，先停止或等它结束");
       return;
     }
-    setError(null);
     try {
       const projectId = await ensureProject(input.prompt.slice(0, 18) || "未命名项目");
       lastRunRef.current = {
@@ -513,7 +536,6 @@ export function Workspace() {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "生成失败";
-      setError(message);
       toast("error", message);
     }
   };
@@ -606,7 +628,6 @@ export function Workspace() {
           loadingError={loadingError}
           onReload={() => setReloadToken((token) => token + 1)}
           sending={running}
-          error={error}
           onCreate={handleCreate}
           onSend={handleSend}
           onStop={handleStop}
