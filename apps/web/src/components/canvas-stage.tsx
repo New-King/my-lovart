@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import {
   AlertCircle,
+  BookOpen,
   Check,
   Download,
   Loader2,
@@ -10,7 +11,7 @@ import {
   MessageSquare,
   Share2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { getSceneVersion, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
 import type {
   BinaryFileData,
@@ -38,9 +39,21 @@ type Props = {
   elements: unknown[];
   files: Record<string, unknown>;
   loaded: boolean;
-  onSave: (elements: unknown[], files: Record<string, unknown>) => void;
+  onSave: (elements: unknown[], files: Record<string, unknown>) => Promise<void>;
   onOpenProjects: () => void;
   onShowChat: () => void;
+  onOpenMaterials: () => void;
+};
+
+export type CanvasStageHandle = {
+  /** 生成结果落到画布；内部会把远端图片转成 data URL 再插入 */
+  insertImage: (input: {
+    url: string;
+    name: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+  }) => Promise<void>;
 };
 
 type Toast = { kind: "success" | "error"; text: string };
@@ -54,16 +67,20 @@ function hasFileDrag(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types).includes("Files");
 }
 
-export function CanvasStage({
-  project,
-  elements,
-  files,
-  loaded,
-  onSave,
-  onOpenProjects,
-  onShowChat,
-}: Props) {
-  const [status, setStatus] = useState<"saved" | "saving">("saved");
+export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasStage(
+  {
+    project,
+    elements,
+    files,
+    loaded,
+    onSave,
+    onOpenProjects,
+    onShowChat,
+    onOpenMaterials,
+  },
+  ref,
+) {
+  const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -147,6 +164,24 @@ export function CanvasStage({
       }
     },
     [showToast],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertImage: (input) =>
+        addChatImage(
+          {
+            url: input.url,
+            title: input.name,
+            mimeType: input.mimeType,
+            width: input.width,
+            height: input.height,
+          },
+          null,
+        ),
+    }),
+    [addChatImage],
   );
 
   const addFiles = useCallback(
@@ -293,7 +328,7 @@ export function CanvasStage({
             {project?.name ?? "未选择项目"}
           </h1>
           <span className="hidden shrink-0 text-[11px] text-faint sm:inline">
-            {status === "saving" ? "保存中…" : "已保存"}
+            {status === "saving" ? "保存中…" : status === "error" ? "保存失败" : "已保存"}
           </span>
         </div>
 
@@ -305,6 +340,16 @@ export function CanvasStage({
             className="grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink lg:hidden"
           >
             <MessageSquare className="size-4" strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenMaterials}
+            title="素材库"
+            aria-label="素材库"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted transition-colors hover:bg-surface hover:text-ink"
+          >
+            <BookOpen className="size-4" strokeWidth={1.75} />
+            <span className="hidden sm:inline">素材库</span>
           </button>
           <button
             type="button"
@@ -358,11 +403,16 @@ export function CanvasStage({
               setStatus("saving");
               if (timer.current) clearTimeout(timer.current);
               timer.current = setTimeout(() => {
-                onSave(
+                void onSave(
                   next as unknown[],
                   nextFiles as unknown as Record<string, unknown>,
-                );
-                setStatus("saved");
+                )
+                  .then(() => {
+                    if (alive.current) setStatus("saved");
+                  })
+                  .catch(() => {
+                    if (alive.current) setStatus("error");
+                  });
               }, 600);
             }}
           />
@@ -403,4 +453,4 @@ export function CanvasStage({
       </div>
     </main>
   );
-}
+});

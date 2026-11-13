@@ -1,66 +1,78 @@
 "use client";
 
 import type {
+  AspectRatio,
   ChatBlock,
+  GenerateRequest,
   ImageBlock,
   InspirationBlock,
-  ToolBlock,
   VideoBlock,
 } from "@my-lovart/shared";
 import {
-  AlertCircle,
-  Check,
-  Clapperboard,
-  ImagePlus,
-  Loader2,
+  Copy,
+  Download,
+  Frame,
+  RotateCcw,
   Search,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { guessMimeTypeFromUrl, setChatImageDragData } from "@/lib/chat-canvas-drag";
+import { downloadAsset } from "@/lib/download";
+import { useToast } from "./ui/toast";
 
 export type PreviewTarget = { src: string; name: string };
 
 type Props = {
   blocks: ChatBlock[];
   onPreview: (target: PreviewTarget) => void;
+  onAddToCanvas: (block: ImageBlock) => void;
+  onGenerate: (input: GenerateRequest) => void;
 };
 
-const TOOL_ICONS = {
-  generate_image: ImagePlus,
-  generate_video: Clapperboard,
-  search_inspiration: Search,
-} as const;
+const ASPECTS: AspectRatio[] = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 
-function StatusMark({ status }: { status: ToolBlock["status"] }) {
-  if (status === "running") return <Loader2 className="size-3 animate-spin text-faint" />;
-  if (status === "failed") return <AlertCircle className="size-3 text-danger" />;
-  return <Check className="size-3 text-faint" strokeWidth={2} />;
+function asAspect(value?: string): AspectRatio | undefined {
+  return value && (ASPECTS as string[]).includes(value) ? (value as AspectRatio) : undefined;
 }
 
-function ToolRow({ block }: { block: ToolBlock }) {
-  const Icon = TOOL_ICONS[block.tool] ?? ImagePlus;
-
+function ActionButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-2 text-[11.5px]">
-      <Icon className="size-3.5 shrink-0 text-faint" strokeWidth={1.75} />
-      <span className="font-medium text-muted">{block.title}</span>
-      {block.detail && <span className="truncate text-faint">· {block.detail}</span>}
-      <span className="ml-auto shrink-0">
-        <StatusMark status={block.status} />
-      </span>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="grid size-7 place-items-center rounded-md text-faint transition-colors hover:bg-canvas hover:text-ink"
+    >
+      {children}
+    </button>
   );
 }
 
 function ImageCard({
   block,
   onPreview,
+  onAddToCanvas,
+  onGenerate,
 }: {
   block: ImageBlock;
   onPreview: Props["onPreview"];
+  onAddToCanvas: Props["onAddToCanvas"];
+  onGenerate: Props["onGenerate"];
 }) {
+  const toast = useToast();
   const label = block.prompt || "生成图像";
+  const aspect = asAspect(block.aspectRatio);
 
   return (
     <figure className="overflow-hidden rounded-xl border border-line bg-surface">
@@ -93,17 +105,69 @@ function ImageCard({
         </span>
       </button>
 
-      <figcaption className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
-        <span className="truncate text-[11.5px] text-muted">{label}</span>
-        <span className="shrink-0 font-mono text-[9px] tracking-[0.12em] text-faint">
-          {block.model} · {block.aspectRatio ?? `${block.width}×${block.height}`}
-        </span>
+      <figcaption className="flex items-center gap-2 border-t border-line px-2.5 py-1.5">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11.5px] text-muted">{label}</p>
+          <p className="truncate font-mono text-[9px] tracking-[0.08em] text-faint">
+            {block.model} · {block.aspectRatio ?? `${block.width}×${block.height}`}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          <ActionButton
+            label="放入画布"
+            onClick={() => onAddToCanvas(block)}
+          >
+            <Frame className="size-3.5" strokeWidth={1.75} />
+          </ActionButton>
+          <ActionButton
+            label="再生成一版"
+            onClick={() =>
+              onGenerate({
+                kind: "image",
+                prompt: block.prompt ?? "再生成一版",
+                ...(aspect ? { aspectRatio: aspect } : {}),
+              })
+            }
+          >
+            <RotateCcw className="size-3.5" strokeWidth={1.75} />
+          </ActionButton>
+          <ActionButton
+            label="下载图片"
+            onClick={() => {
+              void downloadAsset(block.url, label).catch(() => toast("error", "下载失败"));
+            }}
+          >
+            <Download className="size-3.5" strokeWidth={1.75} />
+          </ActionButton>
+          {block.prompt && (
+            <ActionButton
+              label="复制提示词"
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(block.prompt ?? "")
+                  .then(() => toast("success", "提示词已复制"))
+                  .catch(() => toast("error", "复制失败"));
+              }}
+            >
+              <Copy className="size-3.5" strokeWidth={1.75} />
+            </ActionButton>
+          )}
+        </div>
       </figcaption>
     </figure>
   );
 }
 
-function VideoCard({ block }: { block: VideoBlock }) {
+function VideoCard({
+  block,
+  onGenerate,
+}: {
+  block: VideoBlock;
+  onGenerate: Props["onGenerate"];
+}) {
+  const toast = useToast();
+
   return (
     <figure className="overflow-hidden rounded-xl border border-line bg-surface">
       <video
@@ -114,11 +178,35 @@ function VideoCard({ block }: { block: VideoBlock }) {
         src={block.url}
         className="aspect-video w-full bg-ink"
       />
-      <figcaption className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
-        <span className="truncate text-[11.5px] text-muted">{block.prompt || "生成视频"}</span>
-        <span className="shrink-0 font-mono text-[9px] tracking-[0.12em] text-faint">
-          {block.model} · {block.durationSeconds ?? "?"}s · {block.width}×{block.height}
-        </span>
+      <figcaption className="flex items-center gap-2 border-t border-line px-2.5 py-1.5">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11.5px] text-muted">{block.prompt || "生成视频"}</p>
+          <p className="truncate font-mono text-[9px] tracking-[0.08em] text-faint">
+            {block.model} · {block.durationSeconds ?? "?"}s · {block.width}×{block.height}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          <ActionButton
+            label="再生成一版"
+            onClick={() =>
+              onGenerate({
+                kind: "video",
+                prompt: block.prompt ?? "再生成一版",
+              })
+            }
+          >
+            <RotateCcw className="size-3.5" strokeWidth={1.75} />
+          </ActionButton>
+          <ActionButton
+            label="下载视频"
+            onClick={() => {
+              void downloadAsset(block.url, block.prompt || "生成视频");
+            }}
+          >
+            <Download className="size-3.5" strokeWidth={1.75} />
+          </ActionButton>
+        </div>
       </figcaption>
     </figure>
   );
@@ -184,7 +272,7 @@ function TextBlockView({ text }: { text: string }) {
   );
 }
 
-export function ChatBlocks({ blocks, onPreview }: Props) {
+export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onGenerate }: Props) {
   return (
     <div className="space-y-3">
       {blocks.map((block, index) => {
@@ -194,11 +282,20 @@ export function ChatBlocks({ blocks, onPreview }: Props) {
           case "text":
             return <TextBlockView key={key} text={block.text} />;
           case "tool":
-            return <ToolRow key={key} block={block} />;
+            // 工具行由 RunProcess 统一渲染，这里不再平铺
+            return null;
           case "image":
-            return <ImageCard key={key} block={block} onPreview={onPreview} />;
+            return (
+              <ImageCard
+                key={key}
+                block={block}
+                onPreview={onPreview}
+                onAddToCanvas={onAddToCanvas}
+                onGenerate={onGenerate}
+              />
+            );
           case "video":
-            return <VideoCard key={key} block={block} />;
+            return <VideoCard key={key} block={block} onGenerate={onGenerate} />;
           case "inspiration":
             return <InspirationCard key={key} block={block} onPreview={onPreview} />;
         }

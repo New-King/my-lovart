@@ -5,14 +5,15 @@ import { env } from "./lib/env.js";
 import { UnauthorizedError } from "./lib/auth.js";
 import { registerProjectRoutes } from "./http/projects.js";
 import { registerWorkspaceRoutes } from "./http/workspace.js";
+import { registerFileRoutes } from "./http/files.js";
 import {
   createMemoryProjectsRepository,
   createSupabaseProjectsRepository,
 } from "./features/projects/projects.repository.js";
 
 export function buildApp() {
-  // 画布图片以 data URL 随 elements 一起提交，放宽默认 1MB 限制
-  const app = Fastify({ logger: true, bodyLimit: 20 * 1024 * 1024 });
+  // 附件以 base64 随消息上传，几张图就可能超过 1MB，放宽到 64MB
+  const app = Fastify({ logger: true, bodyLimit: 64 * 1024 * 1024 });
 
   app.register(cors, { origin: env.webOrigins });
 
@@ -45,6 +46,7 @@ export function buildApp() {
 
   registerProjectRoutes(app, repo);
   registerWorkspaceRoutes(app);
+  registerFileRoutes(app);
 
   return app;
 }

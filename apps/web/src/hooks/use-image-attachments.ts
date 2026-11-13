@@ -88,6 +88,23 @@ export function useImageAttachments() {
     }
   }, []);
 
+  const addReference = useCallback((ref: { url: string; name: string; mimeType: string }) => {
+    setAttachments((prev) => {
+      if (prev.some((item) => item.url === ref.url)) return prev;
+      return [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          name: ref.name,
+          mimeType: ref.mimeType,
+          url: ref.url,
+          size: 0,
+          status: "ready",
+        },
+      ];
+    });
+  }, []);
+
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((item) => item.id !== id));
   }, []);
@@ -109,6 +126,7 @@ export function useImageAttachments() {
   return {
     attachments,
     addFiles,
+    addReference,
     removeAttachment,
     clearAll,
     restore,

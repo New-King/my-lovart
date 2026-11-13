@@ -69,6 +69,11 @@
   --island-bg-color: #ffffff;
 }
 
+/* Excalidraw 自带的素材库是 .excalidrawlib 空库，和图片素材库不是一回事，隐藏入口 */
+.excalidraw .sidebar-trigger.default-sidebar-trigger {
+  display: none;
+}
+
 /* 聊天里的 Markdown */
 @layer components {
   .prose-muse > * + * {

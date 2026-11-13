@@ -1,8 +1,9 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { downloadAsset } from "@/lib/download";
 
 export function ImageLightbox({
   src,
@@ -35,14 +36,28 @@ export function ImageLightbox({
       onClick={onClose}
       className="fixed inset-0 z-50 grid place-items-center bg-ink/70 p-6 backdrop-blur-sm"
     >
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="关闭预览"
-        className="absolute right-5 top-5 grid size-9 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
-      >
-        <X className="size-4" strokeWidth={2} />
-      </button>
+      <div className="absolute right-5 top-5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void downloadAsset(src, name);
+          }}
+          aria-label="下载图片"
+          title="下载"
+          className="grid size-9 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+        >
+          <Download className="size-4" strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭预览"
+          className="grid size-9 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+        >
+          <X className="size-4" strokeWidth={2} />
+        </button>
+      </div>
 
       <img
         src={src}
