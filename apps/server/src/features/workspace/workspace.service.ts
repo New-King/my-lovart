@@ -8,7 +8,6 @@ import type {
 } from "@my-lovart/shared";
 import { env } from "../../lib/env.js";
 import { normalizeAttachment } from "../files/file.store.js";
-import { runAgent } from "../agent/runtime.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
 import {
   MAX_CONTEXT_MESSAGES,
@@ -121,6 +120,30 @@ export function createWorkspaceService() {
       try {
         if (env.generationMode === "real") {
           const baseUrl = input.baseUrl ?? `http://127.0.0.1:${env.port}`;
+          let runAgent: typeof import("../agent/runtime.js").runAgent;
+          try {
+            ({ runAgent } = await import("../agent/runtime.js"));
+          } catch (err) {
+            const error: RunError = {
+              code: "dependency_missing",
+              message:
+                err instanceof Error && err.message.includes("Cannot find package")
+                  ? "Agent 依赖尚未安装，请在项目根目录运行 pnpm install 后重启服务"
+                  : "Agent 运行时加载失败，请检查服务端日志",
+              retriable: true,
+            };
+            finishMessage(projectId, messageId, "failed", new Date().toISOString(), error);
+            yield {
+              type: "run.failed",
+              runId,
+              messageId,
+              seq: 0,
+              at: new Date().toISOString(),
+              error,
+            };
+            return;
+          }
+
           for await (const event of runAgent({
             runId,
             messageId,
