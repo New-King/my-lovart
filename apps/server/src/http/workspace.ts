@@ -98,7 +98,7 @@ export function registerWorkspaceRoutes(
     async (request, reply) => {
       if (!(await ownProject(request, reply, request.params.projectId))) return;
       try {
-        service.saveCanvas(
+        await service.saveCanvas(
           request.params.projectId,
           request.body?.elements ?? [],
           request.body?.files,
@@ -134,7 +134,7 @@ export function registerWorkspaceRoutes(
 
       let userMessage: ChatMessage;
       try {
-        userMessage = service.appendUserMessage(projectId, text, attachments);
+        userMessage = await service.appendUserMessage(projectId, text, attachments);
       } catch (err) {
         if (err instanceof WorkspaceInputError) {
           return reply.code(400).send({ error: err.message });

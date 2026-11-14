@@ -54,13 +54,13 @@
 目标：刷新、重启、跨轮都不丢，解决“上次还好好的”。
 
 - [x] migration 0002：messages 补 attachments / parts / steps / status / failure / options / updated_at（已写，待执行）
-- [ ] workspace repository：消息与画布读写切 Supabase，保留内存缓存
-- [ ] canvas elements 落 `canvases`，读写在服务端完成
+- [x] workspace repository：消息与画布读写切 Supabase，保留内存缓存
+- [x] canvas elements 落 `canvases`，读写在服务端完成
 - [ ] Excalidraw files 落 Supabase Storage（bucket `project-files`），客户端按需取
 - [ ] 附件 asset_id 改稳定 id（附件表 id / 内容 hash）
 - [ ] 接 LangGraph PostgresSaver checkpointer + thread_id
 - [ ] 历史裁剪与视觉附件预算（压缩、最多张数）
-- [ ] workspace 路由校验 project 归属
+- [x] workspace 路由校验 project 归属
 
 验收：重启服务后，同一 project 的消息、画布、图片、参考图全部还在；同一个 thread 能继续上下文。
 

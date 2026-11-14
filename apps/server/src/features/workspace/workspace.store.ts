@@ -34,6 +34,22 @@ export function getWorkspace(projectId: string): Workspace {
   return ensureWorkspace(projectId);
 }
 
+export function hasWorkspace(projectId: string): boolean {
+  return workspaces.has(projectId);
+}
+
+/** 从持久层灌回内存；之后流式事件仍然操作同一份缓存 */
+export function hydrateWorkspace(
+  projectId: string,
+  data: Pick<Workspace, "elements" | "files" | "messages">,
+): Workspace {
+  const ws = ensureWorkspace(projectId);
+  ws.elements = data.elements;
+  ws.files = data.files;
+  ws.messages = data.messages;
+  return ws;
+}
+
 export function saveElements(
   projectId: string,
   elements: unknown[],

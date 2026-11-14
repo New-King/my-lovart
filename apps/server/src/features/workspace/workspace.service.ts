@@ -20,6 +20,7 @@ import {
   finishMessage,
   finishThought,
   getWorkspace,
+  hydrateWorkspace,
   markRunning,
   saveElements,
   setMessageOptions,
@@ -31,6 +32,10 @@ import {
   updateToolStatus,
   type Workspace,
 } from "./workspace.store.js";
+import {
+  getWorkspaceRepository,
+  type WorkspaceRepository,
+} from "./workspace.repository.js";
 
 export const MESSAGE_MAX = 4000;
 
@@ -70,13 +75,48 @@ export function normalizeAttachments(raw: unknown, baseUrl: string): ChatAttachm
   return result;
 }
 
-export function createWorkspaceService() {
+export function createWorkspaceService(
+  repositoryReady: Promise<WorkspaceRepository | null> = getWorkspaceRepository(),
+) {
+  const loadedProjects = new Set<string>();
+
+  async function ensureLoaded(projectId: string): Promise<WorkspaceRepository | null> {
+    const repo = await repositoryReady;
+    if (!repo) return null;
+    if (loadedProjects.has(projectId)) return repo;
+    try {
+      const snapshot = await repo.load(projectId);
+      hydrateWorkspace(projectId, snapshot);
+      loadedProjects.add(projectId);
+    } catch (err) {
+      console.error("[workspace] 持久层加载失败，本轮回落到内存：", err);
+      return null;
+    }
+    return repo;
+  }
+
+  async function persistMessage(
+    repo: WorkspaceRepository | null,
+    projectId: string,
+    messageId: string,
+  ): Promise<void> {
+    if (!repo) return;
+    const message = ensureWorkspace(projectId).messages.find((item) => item.id === messageId);
+    if (!message) return;
+    try {
+      await repo.saveMessage(projectId, message);
+    } catch (err) {
+      console.error("[workspace] 消息写库失败：", err);
+    }
+  }
+
   return {
-    get(projectId: string): Workspace {
+    async get(projectId: string): Promise<Workspace> {
+      await ensureLoaded(projectId);
       return getWorkspace(projectId);
     },
 
-    saveCanvas(projectId: string, elements: unknown, files?: unknown): Workspace {
+    async saveCanvas(projectId: string, elements: unknown, files?: unknown): Promise<Workspace> {
       if (!Array.isArray(elements)) throw new WorkspaceInputError("elements 必须是数组");
       if (
         files !== undefined &&
@@ -84,18 +124,37 @@ export function createWorkspaceService() {
       ) {
         throw new WorkspaceInputError("files 必须是对象");
       }
-      return saveElements(projectId, elements, files as Record<string, unknown> | undefined);
+      await ensureLoaded(projectId);
+      const workspace = saveElements(
+        projectId,
+        elements,
+        files as Record<string, unknown> | undefined,
+      );
+      const repo = await repositoryReady;
+      if (repo) {
+        try {
+          await repo.saveCanvas(projectId, workspace.elements, workspace.files);
+        } catch (err) {
+          console.error("[workspace] 画布写库失败：", err);
+          throw err;
+        }
+      }
+      return workspace;
     },
 
     /** 用户消息先落库，再开始运行；失败也不会丢这句话。 */
-    appendUserMessage(
+    async appendUserMessage(
       projectId: string,
       text: string,
       attachments: ChatAttachment[],
-    ): ChatMessage {
+    ): Promise<ChatMessage> {
       if (!text && attachments.length === 0) throw new WorkspaceInputError("消息不能为空");
       if (text.length > MESSAGE_MAX) throw new WorkspaceInputError("消息过长");
-      return appendMessage(projectId, "user", text, { attachments });
+      await ensureLoaded(projectId);
+      const message = appendMessage(projectId, "user", text, { attachments });
+      const repo = await repositoryReady;
+      if (repo) await persistMessage(repo, projectId, message.id);
+      return message;
     },
 
     /**
@@ -107,9 +166,11 @@ export function createWorkspaceService() {
       input: RunInput,
       signal: AbortSignal,
     ): AsyncGenerator<RunEvent> {
+      const repo = await ensureLoaded(projectId);
       const runId = randomUUID();
       const messageId = randomUUID();
       startAssistantMessage(projectId, messageId);
+      await persistMessage(repo, projectId, messageId);
 
       const history = ensureWorkspace(projectId).messages
         .filter((message) => message.status !== "queued" && message.status !== "streaming")
@@ -137,6 +198,7 @@ export function createWorkspaceService() {
               retriable: true,
             };
             finishMessage(projectId, messageId, "failed", new Date().toISOString(), error);
+            await persistMessage(repo, projectId, messageId);
             yield {
               type: "run.failed",
               runId,
@@ -165,14 +227,13 @@ export function createWorkspaceService() {
             signal,
           })) {
             applyEvent(projectId, messageId, event);
-            yield event;
-            if (
+            const terminal =
               event.type === "run.completed" ||
               event.type === "run.canceled" ||
-              event.type === "run.failed"
-            ) {
-              return;
-            }
+              event.type === "run.failed";
+            if (terminal) await persistMessage(repo, projectId, messageId);
+            yield event;
+            if (terminal) return;
           }
           return;
         }
@@ -188,14 +249,13 @@ export function createWorkspaceService() {
           signal,
         })) {
           applyEvent(projectId, messageId, event);
-          yield event;
-          if (
+          const terminal =
             event.type === "run.completed" ||
             event.type === "run.canceled" ||
-            event.type === "run.failed"
-          ) {
-            return;
-          }
+            event.type === "run.failed";
+          if (terminal) await persistMessage(repo, projectId, messageId);
+          yield event;
+          if (terminal) return;
         }
       } catch (err) {
         const error: RunError = {
@@ -204,6 +264,7 @@ export function createWorkspaceService() {
           retriable: true,
         };
         finishMessage(projectId, messageId, "failed", new Date().toISOString(), error);
+        await persistMessage(repo, projectId, messageId);
         yield {
           type: "run.failed",
           runId,
@@ -219,6 +280,7 @@ export function createWorkspaceService() {
         if (message?.status === "queued" || message?.status === "streaming") {
           // 客户端断开、进程异常等没有终态事件的情况，按取消收尾
           finishMessage(projectId, messageId, "canceled", new Date().toISOString());
+          await persistMessage(repo, projectId, messageId);
         }
       }
     },
