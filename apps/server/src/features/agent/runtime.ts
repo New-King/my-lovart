@@ -96,6 +96,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     attachmentContext.xml,
     canvasContext.summary,
     canvasContext.xml,
+    Object.keys(attachmentContext.map).length > 0,
   );
   const messages = [
     ...input.history.map((message) =>
@@ -371,6 +372,7 @@ function buildUserText(
   attachmentXml: string,
   canvasSummary: string,
   canvasXml: string,
+  hasVision: boolean,
 ): string {
   const blocks = [input.text || "参考图生成"];
   if (canvasSummary) {
@@ -380,7 +382,9 @@ function buildUserText(
   if (attachmentXml) {
     blocks.push(attachmentXml);
     blocks.push(
-      "<vision_note>参考图已经以图片形式附在这条消息里，可以直接看到画面，不要只凭文件名判断。</vision_note>",
+      hasVision
+        ? "<vision_note>参考图已经以图片形式附在这条消息里，可以直接看到画面，不要只凭文件名判断。</vision_note>"
+        : "<vision_note>用户确实提交了图片附件，但文件没有读取成功（status=\"unavailable\"）。请说明图片打不开、让用户重新上传，不要说「没收到图片」。</vision_note>",
     );
   }
   if (input.kind === "image" || input.kind === "video") {

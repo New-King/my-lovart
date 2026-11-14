@@ -127,6 +127,18 @@ export function registerWorkspaceRoutes(
       }
 
       const attachments = await normalizeAttachments(body.attachments, baseUrlFor(request));
+      const rawAttachments = Array.isArray(body.attachments) ? body.attachments.length : 0;
+      if (rawAttachments > 0) {
+        request.log.info(
+          { raw: rawAttachments, accepted: attachments.length },
+          "message attachments",
+        );
+        // 宁可明确报错，也不要把一张读不出来的图静默降级成纯文本，
+        // 否则用户看到的是「我没收到任何图片」。
+        if (attachments.length === 0) {
+          return reply.code(400).send({ error: "图片附件读取失败，请重新上传" });
+        }
+      }
       if (!text && attachments.length === 0) {
         return reply.code(400).send({ error: "消息不能为空" });
       }
@@ -194,6 +206,13 @@ export function registerWorkspaceRoutes(
       const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
       const aspectRatio = normalizeAspect(body.aspectRatio);
       const attachments = await normalizeAttachments(body.attachments, baseUrlFor(request));
+      const rawAttachments = Array.isArray(body.attachments) ? body.attachments.length : 0;
+      if (rawAttachments > 0) {
+        request.log.info(
+          { raw: rawAttachments, accepted: attachments.length },
+          "generate attachments",
+        );
+      }
 
       const stream = openEventStream(request, reply);
       const controller = new AbortController();

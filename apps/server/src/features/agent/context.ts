@@ -46,12 +46,22 @@ export async function buildAttachmentContext(
   const map: Record<string, string> = {};
   const lines: string[] = [];
 
+  let unavailable = 0;
+
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment.mimeType.startsWith("image/")) continue;
 
     const assetId = `asset-${attachment.id}`;
     const resolved = await resolveReference(attachment.url);
-    if (!resolved) continue;
+    if (!resolved) {
+      // 附件在列表里，但文件读不出来：明确告诉模型「收到了一张图但打不开」，
+      // 否则模型会回答「我没收到任何图片」，用户以为附件丢了。
+      unavailable += 1;
+      lines.push(
+        `  <image index="${index + 1}" asset_id="${assetId}" mime_type="${escapeXml(attachment.mimeType)}" name="${escapeXml(attachment.name)}" status="unavailable" />`,
+      );
+      continue;
+    }
 
     map[assetId] = resolved;
     lines.push(
@@ -70,8 +80,10 @@ export async function buildAttachmentContext(
 
 async function resolveReference(url: string): Promise<string | undefined> {
   if (url.startsWith("http://") || url.startsWith("https://")) {
-    // 本地 /files 地址要转成 data URL，供应商访问不到 127.0.0.1
-    return (await fileDataUrlFromUrl(url)) ?? url;
+    // 本地 /files 地址要转成 data URL，供应商访问不到 127.0.0.1；
+    // 下载失败就是真的读不到，不能把 URL 原样交给模型假装图片可用。
+    if (url.includes("/files/")) return fileDataUrlFromUrl(url);
+    return url;
   }
   return fileDataUrlFromUrl(url);
 }

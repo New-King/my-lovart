@@ -8,7 +8,8 @@
     "start": "node --env-file=../../.env.local --import tsx ./src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify:persistence": "pnpm build && node --env-file=../../.env.local ./scripts/verify-persistence.mjs"
+    "verify:persistence": "pnpm build && node --env-file=../../.env.local ./scripts/verify-persistence.mjs",
+    "verify:attachments": "pnpm build && node --env-file=../../.env.local ./scripts/verify-attachments.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
