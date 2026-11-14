@@ -130,7 +130,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
       try {
         for await (const event of service.run(
           projectId,
-          { text, kind: "auto", aspectRatio, attachments },
+          { text, kind: "auto", aspectRatio, attachments, baseUrl: baseUrlFor(request) },
           controller.signal,
         )) {
           if (!stream.send(event)) break;
@@ -176,7 +176,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
       try {
         for await (const event of service.run(
           projectId,
-          { text: prompt, kind, aspectRatio, attachments },
+          { text: prompt, kind, aspectRatio, attachments, baseUrl: baseUrlFor(request) },
           controller.signal,
         )) {
           if (!stream.send(event)) break;

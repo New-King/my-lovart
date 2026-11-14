@@ -11,6 +11,7 @@ import { env } from "../../lib/env.js";
 import { chat } from "../../lib/llm.js";
 import { normalizeAttachment } from "../files/file.store.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
+import { createRealRun, looksLikeImage, looksLikeVideo } from "./real-agent.js";
 import {
   MAX_CONTEXT_MESSAGES,
   appendBlock,
@@ -42,13 +43,15 @@ const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，一个画布类设�
 要求：
 - 用中文回答，简洁、具体、可执行。给建议时落到构图、配色（给出色值）、字体、尺寸这些层面。
 - 不要写客套话和总结段落。
-- 当前版本你只能对话，不能在画布上绘图。不要声称你已经画好了或正在生成，也不要让用户去点不存在的按钮。`;
+- 当用户明确要生成图片或视频时，系统会走生成工具；这里只需要给出方向性建议。`;
 
 export type RunInput = {
   text: string;
   kind: MockKind;
   aspectRatio?: AspectRatio;
   attachments?: ChatAttachment[];
+  /** 服务端自己的公开地址，用于把生成结果落成 /files/:id */
+  baseUrl?: string;
 };
 
 type Payload<T> = T extends unknown ? Omit<T, "runId" | "messageId" | "seq" | "at"> : never;
@@ -118,7 +121,40 @@ export function createWorkspaceService() {
       startAssistantMessage(projectId, messageId);
 
       try {
-        if (env.agentMode === "llm") {
+        const wantsMedia =
+          input.kind === "image" ||
+          input.kind === "video" ||
+          looksLikeImage(input.text) ||
+          looksLikeVideo(input.text) ||
+          (input.attachments?.length ?? 0) > 0;
+
+        if (env.generationMode === "real" && wantsMedia) {
+          const baseUrl = input.baseUrl ?? `http://127.0.0.1:${env.port}`;
+          for await (const event of createRealRun({
+            runId,
+            messageId,
+            text: input.text,
+            kind: input.kind,
+            aspectRatio: input.aspectRatio,
+            attachments: input.attachments ?? [],
+            signal,
+            baseUrl,
+          })) {
+            applyEvent(projectId, messageId, event);
+            yield event;
+            if (
+              event.type === "run.completed" ||
+              event.type === "run.canceled" ||
+              event.type === "run.failed"
+            ) {
+              return;
+            }
+          }
+          return;
+        }
+
+        // real 模式下纯聊天也走真实模型，避免「接的什么模型」说不清
+        if (env.agentMode === "llm" || env.generationMode === "real") {
           yield* runLlm(projectId, runId, messageId, signal);
           return;
         }

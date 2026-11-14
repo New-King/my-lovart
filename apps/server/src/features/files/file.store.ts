@@ -92,3 +92,45 @@ export function normalizeAttachment(
 export function getFile(id: string): StoredFile | undefined {
   return files.get(id);
 }
+
+const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
+
+/** 生成结果先落盘，避免供应商的临时 URL 过期后画布打不开 */
+export async function importRemoteFile(
+  url: string,
+  baseUrl: string,
+  options: { name: string; fallbackMimeType: string },
+): Promise<{ url: string; mimeType: string; size: number }> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`下载生成结果失败（HTTP ${response.status}）`);
+
+  const data = Buffer.from(await response.arrayBuffer());
+  if (data.byteLength === 0) throw new Error("生成结果为空");
+  if (data.byteLength > MAX_IMPORT_BYTES) throw new Error("生成结果超过 64MB");
+
+  const mimeType =
+    response.headers.get("content-type")?.split(";")[0]?.trim() ||
+    options.fallbackMimeType;
+  const id = randomUUID();
+  files.set(id, { id, name: options.name, mimeType, data });
+
+  return {
+    url: `${baseUrl}${FILE_ROUTE_PREFIX}${id}`,
+    mimeType,
+    size: data.byteLength,
+  };
+}
+
+/** 供应商要求可公网访问的图片；本地附件转成 data URL 再送过去 */
+export function fileDataUrlFromUrl(url: string): string | undefined {
+  if (!url.startsWith("data:")) {
+    const index = url.indexOf(FILE_ROUTE_PREFIX);
+    if (index < 0) return undefined;
+    const id = url.slice(index + FILE_ROUTE_PREFIX.length).split(/[?#]/)[0];
+    if (!id) return undefined;
+    const file = files.get(id);
+    if (!file) return undefined;
+    return `data:${file.mimeType};base64,${file.data.toString("base64")}`;
+  }
+  return url;
+}
