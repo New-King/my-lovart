@@ -84,6 +84,7 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         status: "queued",
         steps: [],
         blocks: [],
+        parts: [],
         ...(event.queuePosition !== undefined
           ? { queuePosition: event.queuePosition }
           : {}),
@@ -143,11 +144,21 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         ),
       }));
     case "message.delta":
-      return patch((message) => ({
-        ...message,
-        updatedAt: at,
-        content: message.content + event.delta,
-      }));
+      return patch((message) => {
+        const parts = [...(message.parts ?? [])];
+        const last = parts[parts.length - 1];
+        if (last?.type === "text") {
+          parts[parts.length - 1] = { type: "text", text: last.text + event.delta };
+        } else {
+          parts.push({ type: "text", text: event.delta });
+        }
+        return {
+          ...message,
+          updatedAt: at,
+          content: message.content + event.delta,
+          parts,
+        };
+      });
     case "message.options":
       return patch((message) => ({ ...message, updatedAt: at, options: event.options }));
     case "tool.started":
@@ -204,7 +215,9 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         ...message,
         updatedAt: at,
         blocks: [...(message.blocks ?? []), event.artifact],
+        parts: [...(message.parts ?? []), { type: "block", block: event.artifact }],
       }));
+    case "canvas.command":
     case "canvas.sync":
       return prev;
     case "run.completed":
@@ -334,7 +347,15 @@ export function Workspace() {
         silent: true,
       });
     }
-  }, []);
+    if (event.type === "canvas.command") {
+      const result = canvasRef.current?.applyCommands(event.commands);
+      if (!result) {
+        toast("error", "画布还没准备好，Agent 的操作没有执行");
+      } else if (result.errors.length > 0) {
+        toast("error", result.errors[0]!);
+      }
+    }
+  }, [toast]);
 
   const runStream = useCallback(
     async (
