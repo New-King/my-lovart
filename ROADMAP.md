@@ -53,8 +53,8 @@
 
 目标：刷新、重启、跨轮都不丢，解决“上次还好好的”。
 
-- [ ] migration 0002：messages 补 attachments / parts / steps / status / failure / options / updated_at
-- [ ] 每个 project 固定一个 session（或按会话扩展），消息读写走 Supabase
+- [x] migration 0002：messages 补 attachments / parts / steps / status / failure / options / updated_at（已写，待执行）
+- [ ] workspace repository：消息与画布读写切 Supabase，保留内存缓存
 - [ ] canvas elements 落 `canvases`，读写在服务端完成
 - [ ] Excalidraw files 落 Supabase Storage（bucket `project-files`），客户端按需取
 - [ ] 附件 asset_id 改稳定 id（附件表 id / 内容 hash）
