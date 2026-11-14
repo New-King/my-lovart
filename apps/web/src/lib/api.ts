@@ -39,6 +39,25 @@ export type AgentHealth = {
   store: "memory" | "supabase";
   generation: "mock" | "real";
   uptime: number;
+  pid?: number;
+  startedAt?: string;
+  traceDir?: string;
+  checkpointer?: { status: string; host?: string; detail?: string };
+};
+
+export type BackgroundJob = {
+  id: string;
+  projectId: string;
+  jobType: "image_generation" | "video_generation";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  payload: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  errorCode?: string;
+  errorMessage?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  createdAt: string;
+  completedAt?: string;
 };
 
 export async function getHealth(): Promise<AgentHealth> {
@@ -166,6 +185,14 @@ export const saveCanvas = (
   request<void>(`/workspace/${projectId}/canvas`, {
     method: "POST",
     body: JSON.stringify({ elements, files }),
+  });
+
+export const getJob = (projectId: string, jobId: string) =>
+  request<BackgroundJob>(`/workspace/${projectId}/jobs/${jobId}`);
+
+export const cancelJob = (projectId: string, jobId: string) =>
+  request<{ ok: boolean }>(`/workspace/${projectId}/jobs/${jobId}/cancel`, {
+    method: "POST",
   });
 
 export function sendMessageStream(

@@ -35,6 +35,7 @@ import {
   type ChatImageDragPayload,
 } from "@/lib/chat-canvas-drag";
 import type { Project } from "@/lib/api";
+import { getWorkspace } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useToast } from "./ui/toast";
 
@@ -70,6 +71,8 @@ export type CanvasStageHandle = {
     /** 生成链路自动入画布时不弹 toast */
     silent?: boolean;
   }) => Promise<void>;
+  /** 服务端作业/其他客户端改了画布后，重新拉取并应用 */
+  syncFromServer: () => Promise<void>;
   /** 执行 Agent 下发的画布动作（移动 / 对齐 / 删除…） */
   applyCommands: (commands: CanvasCommand[]) => CanvasCommandResult;
 };
@@ -369,8 +372,20 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           };
         }
       },
+      async syncFromServer() {
+        if (!project) return;
+        const api = apiRef.current;
+        if (!api) return;
+        const workspace = await getWorkspace(project.id);
+        const files = Object.values(workspace.files ?? {}) as BinaryFileData[];
+        if (files.length > 0) api.addFiles(files);
+        api.updateScene({
+          elements: workspace.elements as never[],
+          captureUpdate: "IMMEDIATELY",
+        });
+      },
     }),
-    [addChatImage],
+    [addChatImage, project],
   );
 
   const addFiles = useCallback(

@@ -363,6 +363,7 @@ export function createWorkspaceService(
           for await (const event of runAgent({
             runId,
             messageId,
+            projectId,
             text: input.text,
             kind: input.kind,
             aspectRatio: input.aspectRatio,

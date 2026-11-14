@@ -53,6 +53,9 @@ export type ImageBlock = {
   aspectRatio?: string;
   /** 图生图/参考图来源的稳定 id，不是画布 elementId */
   sourceAssetIds?: string[];
+  /** 服务端已落画布时的元素 id；前端据此只刷新，不重复插入 */
+  elementId?: string;
+  placement?: { x: number; y: number; width: number; height: number };
   /** 同一次工具调用产出的资源共用一个批次，界面按批次排成一行 */
   batchId?: string;
 };
@@ -147,6 +150,9 @@ export type RunError = {
   code: string;
   message: string;
   retriable: boolean;
+  /** 生成作业超时时带回，前端继续轮询，结果会自动上画布 */
+  jobId?: string;
+  jobType?: "image_generation" | "video_generation";
 };
 
 /** 一次运行里的一段思考；长任务会有多段，不是一份。 */

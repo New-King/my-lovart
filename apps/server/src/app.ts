@@ -67,6 +67,16 @@ export function buildApp() {
       );
     });
 
+  // 生成作业 worker 和 API 同进程；表即队列，重启后自动继续
+  void import("./features/jobs/worker.js")
+    .then((mod) => mod.startJobWorker())
+    .catch((err) => {
+      app.log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "生成作业 worker 未启动",
+      );
+    });
+
   const repo =
     env.projectsStore === "supabase" ? createSupabaseProjectsRepository() : createMemoryProjectsRepository();
 

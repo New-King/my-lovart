@@ -34,7 +34,7 @@
 - [x] 持久化线程与画布/文件
 - [x] 产物账本（标题/prompt/模型/血缘/版本）
 - [ ] 分镜与镜头状态
-- [ ] 生成作业队列
+- [x] 生成作业队列（图片/视频；视频画布播放待做）
 - [ ] 画布工具深度（add_text/add_shape/add_line/update_text/update_style）
 - [ ] golden 场景自动化
 - [ ] 可观测 trace
@@ -93,13 +93,23 @@
 
 目标：慢任务不堵 Agent，失败可恢复。
 
-- [ ] `background_jobs` + worker（Supabase 表轮询或 PGMQ）
-- [ ] 图片/视频工具改为提交作业 + 等待，超时返回 jobId
-- [ ] 重试、取消、失败码、进度
-- [ ] 结果落 Storage，服务端计算画布 placement
-- [ ] 视频播放/编码问题一起解决
+### 2a · 已完成
 
-验收：视频生成期间可以取消；刷新后作业继续；超时后结果晚报也能自动上画布。
+- [x] `background_jobs` + 表队列 + claim RPC（migration 0005 已执行）
+- [x] API 进程内 worker（并发 2，重启继续；失败按 attempt 重试）
+- [x] 图片/视频工具改为提交作业 + 等待，超时返回 jobId
+- [x] 结果落 Storage/资产账本；图片由服务端计算 placement + 写锁直接上画布
+- [x] 前端 artifact 带 elementId 时只刷新；tool.failed 带 jobId 走 fallback 轮询
+- [x] 项目删除清理 Storage 与 checkpoint
+
+验收：真实 Seedream 作业 29.4s 成功，资产/画布/artifact 一致；记录 `docs/notes/M17.md`。
+
+### 2b · 待做
+
+- [ ] 视频画布元素与内联播放
+- [ ] 工具卡片持续进度（worker → job 进度）
+- [ ] 生成中取消真实手测
+- [ ] 非重试错误分类、限流与多实例公平性
 
 ## Phase 2.5 · 分镜与镜头
 
@@ -149,5 +159,5 @@
 
 ## 下一步（只做这一件）
 
-Phase 2a：`background_jobs` + worker + 图片/视频工具改为提交作业；超时返回 jobId，前端 fallback 轮询；服务端自动落位并写画布。  
-先把“长任务不堵 Agent、关页面也能出结果、超时能补”跑通，再做视频内联播放与分镜。
+Phase 2b：视频画布元素与内联播放；把 worker 进度映射到工具卡片；构造一次真实超时/取消验证。  
+完成后进入 Phase 2.5 分镜。

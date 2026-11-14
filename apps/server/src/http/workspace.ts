@@ -4,6 +4,7 @@ import { env } from "../lib/env.js";
 import { requireUserId } from "../lib/auth.js";
 import { createTrace } from "../lib/trace.js";
 import { LlmError } from "../lib/llm.js";
+import { cancelJob, getJob } from "../features/jobs/jobs.js";
 import {
   MESSAGE_MAX,
   WorkspaceInputError,
@@ -276,6 +277,27 @@ export function registerWorkspaceRoutes(
         reply.raw.off("close", onClose);
         stream.close();
       }
+    },
+  );
+
+  /** 前端 fallback 轮询：作业超时后继续查询，成功则刷新画布 */
+  app.get<{ Params: Params & { jobId: string } }>(
+    "/workspace/:projectId/jobs/:jobId",
+    async (request, reply) => {
+      if (!(await ownProject(request, reply, request.params.projectId))) return;
+      const job = await getJob(request.params.projectId, request.params.jobId);
+      if (!job) return reply.code(404).send({ error: "作业不存在" });
+      return job;
+    },
+  );
+
+  app.post<{ Params: Params & { jobId: string } }>(
+    "/workspace/:projectId/jobs/:jobId/cancel",
+    async (request, reply) => {
+      if (!(await ownProject(request, reply, request.params.projectId))) return;
+      const canceled = await cancelJob(request.params.projectId, request.params.jobId);
+      if (!canceled) return reply.code(409).send({ error: "作业已完成或无法取消" });
+      return reply.code(202).send({ ok: true });
     },
   );
 }

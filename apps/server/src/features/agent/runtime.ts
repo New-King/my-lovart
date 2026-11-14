@@ -24,6 +24,7 @@ import { createAgentTools } from "./tools.js";
 export type AgentRunInput = {
   runId: string;
   messageId: string;
+  projectId: string;
   text: string;
   kind: "auto" | "image" | "video";
   aspectRatio?: AspectRatio;
@@ -88,6 +89,8 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   });
   const tools = createAgentTools({
     bus,
+    projectId: input.projectId,
+    ...(input.threadId ? { threadId: input.threadId } : {}),
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
     canvasSummary: canvasContext.summary,
     canvasElements: canvasContext.elements,
@@ -356,6 +359,10 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
               code: typeof parsed.code === "string" ? parsed.code : "provider_error",
               message: parsed.error,
               retriable: true,
+              ...(typeof parsed.jobId === "string" ? { jobId: parsed.jobId } : {}),
+              ...(parsed.jobType === "image_generation" || parsed.jobType === "video_generation"
+                ? { jobType: parsed.jobType }
+                : {}),
             },
           });
         } else {
@@ -578,7 +585,7 @@ function readChunkText(chunk: unknown): string {
 }
 
 function parseToolOutput(output: unknown):
-  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown }
+  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown; jobId?: string; jobType?: string }
   | null {
   if (typeof output === "string") return safeJson(output);
   if (typeof output !== "object" || output === null) return null;

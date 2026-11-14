@@ -12,6 +12,7 @@ import { fileDataUrlFromUrl, importRemoteFile } from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
 import { GenerationError, isAbortError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
+import { createJob, cancelJob, jobsEnabled, waitForJob } from "../jobs/jobs.js";
 import type { AgentEventBus } from "./bus.js";
 import type { CanvasElementBrief } from "./context.js";
 
@@ -112,6 +113,8 @@ const getAssetSchema = z.object({
 
 type ToolContext = {
   bus: AgentEventBus;
+  projectId: string;
+  threadId?: string;
   attachmentMap: Record<string, string>;
   canvasSummary: string;
   canvasElements: CanvasElementBrief[];
@@ -125,16 +128,82 @@ export function createAgentTools(context: ToolContext) {
   return [
     tool(
       async (input) => {
+        const referenceImages = await resolveReferences(
+          input.inputImages,
+          context.attachmentMap,
+          context.projectAssets,
+        );
+
+        if (jobsEnabled()) {
+          try {
+            context.bus.push({ type: "progress", progress: 5, stage: "提交生成作业" });
+            const job = await createJob({
+              projectId: context.projectId,
+              type: "image_generation",
+              ...(context.threadId ? { threadId: context.threadId } : {}),
+              payload: {
+                prompt: input.prompt,
+                title: input.title,
+                aspectRatio: input.aspectRatio,
+                inputImages: referenceImages,
+                sourceAssetIds: input.inputImages ?? [],
+              },
+            });
+            const finished = await waitForJob(context.projectId, job.id, {
+              timeoutMs: 120_000,
+              signal: context.signal,
+            });
+            if (context.signal.aborted) {
+              await cancelJob(context.projectId, job.id).catch(() => undefined);
+              throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
+            }
+
+            if (finished?.status === "succeeded") {
+              const result = finished.result as {
+                artifact?: ImageBlock;
+              };
+              if (result?.artifact) {
+                return JSON.stringify({
+                  summary: `已生成图片「${result.artifact.title ?? input.title}」并放到画布。`,
+                  artifact: result.artifact,
+                  jobId: finished.id,
+                });
+              }
+            }
+
+            if (finished && (finished.status === "failed" || finished.status === "canceled")) {
+              return JSON.stringify({
+                error: finished.errorMessage ?? "图片生成失败，请重试",
+                code: finished.errorCode ?? "job_failed",
+                jobId: finished.id,
+                jobType: "image_generation",
+              });
+            }
+
+            return JSON.stringify({
+              summary: "图片还在生成，完成后会自动放到画布，不用重复提交。",
+              error: "generation timed out",
+              code: "job_timeout",
+              jobId: job.id,
+              jobType: "image_generation",
+            });
+          } catch (err) {
+            if (context.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+              throw err;
+            }
+            console.warn(
+              "[jobs] 提交图片作业失败，退回直连生成：",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+
         context.bus.push({ type: "progress", progress: 12, stage: "提交给 Seedream" });
         try {
           const result = await generateImageWithVolces({
             prompt: input.prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
-            referenceImages: await resolveReferences(
-              input.inputImages,
-              context.attachmentMap,
-              context.projectAssets,
-            ),
+            referenceImages,
             signal: context.signal,
           });
 
@@ -176,19 +245,86 @@ export function createAgentTools(context: ToolContext) {
     ),
     tool(
       async (input) => {
+        const referenceImages = (
+          await resolveReferences(
+            input.inputImages,
+            context.attachmentMap,
+            context.projectAssets,
+          )
+        ).slice(0, 2);
+
+        if (jobsEnabled()) {
+          try {
+            context.bus.push({ type: "progress", progress: 5, stage: "提交生成作业" });
+            const job = await createJob({
+              projectId: context.projectId,
+              type: "video_generation",
+              ...(context.threadId ? { threadId: context.threadId } : {}),
+              payload: {
+                prompt: input.prompt,
+                title: input.title,
+                aspectRatio: input.aspectRatio,
+                durationSeconds: input.durationSeconds ?? 8,
+                inputImages: referenceImages,
+                sourceAssetIds: input.inputImages ?? [],
+              },
+            });
+            const finished = await waitForJob(context.projectId, job.id, {
+              timeoutMs: 600_000,
+              signal: context.signal,
+            });
+            if (context.signal.aborted) {
+              await cancelJob(context.projectId, job.id).catch(() => undefined);
+              throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
+            }
+
+            if (finished?.status === "succeeded") {
+              const result = finished.result as {
+                artifact?: VideoBlock;
+              };
+              if (result?.artifact) {
+                return JSON.stringify({
+                  summary: `已生成视频「${result.artifact.title ?? input.title}」。`,
+                  artifact: result.artifact,
+                  jobId: finished.id,
+                });
+              }
+            }
+
+            if (finished && (finished.status === "failed" || finished.status === "canceled")) {
+              return JSON.stringify({
+                error: finished.errorMessage ?? "视频生成失败，请重试",
+                code: finished.errorCode ?? "job_failed",
+                jobId: finished.id,
+                jobType: "video_generation",
+              });
+            }
+
+            return JSON.stringify({
+              summary: "视频还在生成，完成后会自动出现在对话里，不用重复提交。",
+              error: "generation timed out",
+              code: "job_timeout",
+              jobId: job.id,
+              jobType: "video_generation",
+            });
+          } catch (err) {
+            if (context.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+              throw err;
+            }
+            console.warn(
+              "[jobs] 提交视频作业失败，退回直连生成：",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+
         context.bus.push({ type: "progress", progress: 8, stage: "提交任务" });
         try {
           const result = await generateVideoWithMetaso({
             prompt: input.prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
             durationSeconds: input.durationSeconds ?? 8,
-            referenceImages: (
-              await resolveReferences(
-                input.inputImages,
-                context.attachmentMap,
-                context.projectAssets,
-              )
-            ).slice(0, 2),
+            referenceImages,
             signal: context.signal,
             onProgress: (progress, stage) =>
               context.bus.push({ type: "progress", progress, stage }),

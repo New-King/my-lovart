@@ -22,6 +22,7 @@ import {
   renameProject,
   saveCanvas,
   sendMessageStream,
+  type BackgroundJob,
   type Project,
   type WorkspaceData,
 } from "@/lib/api";
@@ -31,6 +32,7 @@ import type { ChatComposerHandle } from "./chat-composer";
 import { MaterialLibraryPanel } from "./material-library-panel";
 import { ProjectRail } from "./project-rail";
 import { useToast } from "./ui/toast";
+import { useJobFallbackPolling } from "@/hooks/use-job-fallback-polling";
 
 const DRAFT_PREFIX = "draft-";
 const IMAGE_ONLY_PROMPT = "看看这些参考图，给我一些具体的建议。";
@@ -333,22 +335,42 @@ export function Workspace() {
     [activeId],
   );
 
+  const handleJobSettled = useCallback(
+    (job: BackgroundJob) => {
+      if (job.status === "succeeded") {
+        void canvasRef.current?.syncFromServer();
+        toast("success", "生成完成，已放到画布");
+      } else if (job.status === "failed") {
+        toast("error", job.errorMessage ?? "生成失败，请重试");
+      } else if (job.status === "canceled") {
+        toast("info", "生成已取消");
+      }
+    },
+    [toast],
+  );
+  const { watchJob } = useJobFallbackPolling(activeId, handleJobSettled);
+
   const handleEvent = useCallback((event: RunEvent) => {
     setData((prev) => applyRunEvent(prev, event));
     if (event.type === "artifact.ready" && event.artifact.type === "image") {
       const block: ImageBlock = event.artifact;
-      void canvasRef.current?.insertImage({
-        url: block.url,
-        name: block.title || block.prompt || "生成图像",
-        mimeType: block.mimeType,
-        width: block.width,
-        height: block.height,
-        assetId: block.id,
-        ...(block.title ? { title: block.title } : {}),
-        ...(block.prompt ? { prompt: block.prompt } : {}),
-        ...(block.batchId ? { batchId: block.batchId } : {}),
-        silent: true,
-      });
+      if (block.elementId) {
+        // 服务端作业已经写进画布，前端只拉取，避免重复插一张
+        void canvasRef.current?.syncFromServer();
+      } else {
+        void canvasRef.current?.insertImage({
+          url: block.url,
+          name: block.title || block.prompt || "生成图像",
+          mimeType: block.mimeType,
+          width: block.width,
+          height: block.height,
+          assetId: block.id,
+          ...(block.title ? { title: block.title } : {}),
+          ...(block.prompt ? { prompt: block.prompt } : {}),
+          ...(block.batchId ? { batchId: block.batchId } : {}),
+          silent: true,
+        });
+      }
     }
     if (event.type === "canvas.command") {
       const result = canvasRef.current?.applyCommands(event.commands);
@@ -358,7 +380,10 @@ export function Workspace() {
         toast("error", result.errors[0]!);
       }
     }
-  }, [toast]);
+    if (event.type === "tool.failed" && event.error.jobId) {
+      watchJob(event.error.jobId);
+    }
+  }, [toast, watchJob]);
 
   const runStream = useCallback(
     async (

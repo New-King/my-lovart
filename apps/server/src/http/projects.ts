@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUserId } from "../lib/auth.js";
 import { ProjectNameError, createProjectsService } from "../features/projects/projects.service.js";
 import type { ProjectsRepository } from "../features/projects/projects.repository.js";
+import { cleanupProjectStorage } from "../features/files/project-cleanup.js";
 import { getWorkspaceRepository } from "../features/workspace/workspace.repository.js";
 
 type Params = { id: string };
@@ -59,6 +60,15 @@ export function registerProjectRoutes(app: FastifyInstance, repo: ProjectsReposi
       threadId = await workspaceRepo?.getThreadId(request.params.id);
     } catch {
       // 没有 thread / 迁移未执行都不影响删除
+    }
+
+    try {
+      await cleanupProjectStorage(request.params.id);
+    } catch (err) {
+      request.log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "项目 Storage 清理失败（项目继续删除）",
+      );
     }
 
     const ok = await service.remove(userId, request.params.id);
