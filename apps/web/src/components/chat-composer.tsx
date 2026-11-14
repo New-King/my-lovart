@@ -21,6 +21,8 @@ export type ChatComposerHandle = {
   openFilePicker: () => void;
   addMaterial: (material: LibraryMaterial) => void;
   addReference: (item: { url: string; name: string; mimeType: string }) => void;
+  setText: (value: string) => void;
+  focus: () => void;
 };
 
 type Props = {
@@ -140,6 +142,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
       },
       addReference(item) {
         addReference(item);
+      },
+      setText(value: string) {
+        setText(value);
+        setMentionQuery(null);
+        window.requestAnimationFrame(() => textareaRef.current?.focus());
+      },
+      focus() {
+        textareaRef.current?.focus();
       },
     }),
     [addReference],

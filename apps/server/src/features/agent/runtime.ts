@@ -15,6 +15,9 @@ import { AgentEventBus } from "./bus.js";
 import { buildAttachmentContext, buildCanvasContext } from "./context.js";
 import { createAgentTools } from "./tools.js";
 
+const OPTIONS_OPEN = "[OPTIONS]";
+const OPTIONS_CLOSE = "[/OPTIONS]";
+
 const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，工作在一个无限画布工具里。
 
 行为要求：
@@ -26,6 +29,14 @@ const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，工作在一个无�
 - 信息不够时，先用 1-2 句给出你的默认方案，再问最多 3 个关键问题，然后结束这一轮，不要调用任何工具，不要先做首帧图。
 - 用户说「先出一版」「直接做」「不用问」或已经给全信息时，直接开工，不要再确认。
 - 不要用工具来提问；问题直接写在回复里。用户回答后直接执行，不要重复确认。
+
+追问与快捷选项：
+- 一次只问一个最关键的问题。这个问题有 2-4 个清晰、互斥的选项时，在回复的最后一行追加：
+  [OPTIONS]选项一|选项二|选项三[/OPTIONS]
+- 按钮轮的正文要短：1 句承接 + 1 句问题，不要再展开解释。选项是用户点击后直接发回给你的原话，要写成用户口吻的完整选择（例如「16:9 横版」「3:4 竖版海报」），不要写「A」「是」「否」这类脱离上下文的词。
+- 开放性问题（例如「想突出什么卖点」）不要硬配按钮，用纯文字问。
+- OPTIONS 必须是最后一行，只能出现一次；不要在正文里解释这个协议，也不要把选项写进正文。
+- 用户已经回答过的信息不要再问；信息足够就直接调用生成工具。
 
 生成与工具：
 - 用户要生成图片或视频时，必须调用 \`generate_image\` / \`generate_video\`，不要只描述画面，也不要假装已经生成。
@@ -121,6 +132,12 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
   let activeTool: { toolCallId: string } | null = null;
 
+  // 模型用 [OPTIONS]a|b|c[/OPTIONS] 给出快捷选项；这段协议不能出现在正文里，
+  // 需要跨 chunk 缓冲，等标记完整后一次性转成 message.options。
+  let pendingText = "";
+  let afterOptions = "";
+  let optionsSent = false;
+
   try {
     const stream = agent.streamEvents(
       { messages },
@@ -154,7 +171,49 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
         // 推理模型的原始 chain-of-thought 不直接展示给用户；
         // 用户能看到的是模型自己写给用户的计划与结果说明。
         const text = readChunkText(chunk);
-        if (text) yield emit({ type: "message.delta", delta: text });
+        if (!text) continue;
+
+        pendingText += text;
+
+        if (optionsSent) {
+          afterOptions += pendingText;
+          pendingText = "";
+          continue;
+        }
+
+        const open = pendingText.indexOf(OPTIONS_OPEN);
+        if (open === -1) {
+          // 末尾可能是半个 [OPTIONS] 标记，先扣住不发
+          const hold = partialMarkerHold(pendingText);
+          const visible =
+            hold > 0 ? pendingText.slice(0, pendingText.length - hold) : pendingText;
+          pendingText = hold > 0 ? pendingText.slice(-hold) : "";
+          if (visible) yield emit({ type: "message.delta", delta: visible });
+          continue;
+        }
+
+        const before = pendingText.slice(0, open).replace(/\s+$/, "");
+        if (before) yield emit({ type: "message.delta", delta: before });
+
+        const close = pendingText.indexOf(OPTIONS_CLOSE, open + OPTIONS_OPEN.length);
+        if (close === -1) {
+          // 选项还没流完，保留标记等待后续 chunk
+          pendingText = pendingText.slice(open);
+          continue;
+        }
+
+        const raw = pendingText.slice(open + OPTIONS_OPEN.length, close);
+        afterOptions = pendingText.slice(close + OPTIONS_CLOSE.length);
+        pendingText = "";
+
+        const parsedOptions = parseOptions(raw);
+        if (parsedOptions.length > 0) {
+          optionsSent = true;
+          yield emit({ type: "message.options", options: parsedOptions });
+        } else if (afterOptions) {
+          pendingText = afterOptions;
+          afterOptions = "";
+        }
         continue;
       }
 
@@ -245,6 +304,11 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       yield emit({ type: "run.canceled" });
       return;
     }
+
+    // 流结束时把扣住的正文放出来；未闭合的协议标记直接丢弃
+    const tail = optionsSent ? afterOptions : flushPending(pendingText);
+    if (tail.trim()) yield emit({ type: "message.delta", delta: tail });
+
     yield emit({ type: "run.completed" });
   } catch (error) {
     if (input.signal.aborted) {
@@ -378,4 +442,33 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message.slice(0, 300);
   if (typeof error === "string") return error.slice(0, 300);
   return "Agent 运行失败，请重试";
+}
+
+function parseOptions(raw: string): string[] {
+  const result: string[] = [];
+  for (const part of raw.split("|")) {
+    const value = part.trim().replace(/^["'「『]+|["'」』]+$/g, "");
+    if (!value || value.length > 40) continue;
+    if (result.includes(value)) continue;
+    result.push(value);
+    if (result.length === 6) break;
+  }
+  return result;
+}
+
+/** 末尾若是半个 [OPTIONS] 标记，返回要扣住的字符数 */
+function partialMarkerHold(text: string): number {
+  const max = Math.min(text.length, OPTIONS_OPEN.length - 1);
+  for (let size = max; size > 0; size -= 1) {
+    if (text.endsWith(OPTIONS_OPEN.slice(0, size))) return size;
+  }
+  return 0;
+}
+
+/** 流结束时释放被扣住的正文；未闭合的协议标记直接丢弃 */
+function flushPending(text: string): string {
+  const open = text.indexOf(OPTIONS_OPEN);
+  if (open >= 0) return text.slice(0, open);
+  const hold = partialMarkerHold(text);
+  return hold > 0 ? text.slice(0, text.length - hold) : text;
 }

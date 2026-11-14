@@ -149,6 +149,8 @@ export type ChatMessage = {
   thoughts?: Thought[];
   attachments?: ChatAttachment[];
   blocks?: ChatBlock[];
+  /** 助手这一轮给出的快捷选项，用户点一下就把选项原文发回去 */
+  options?: string[];
 };
 
 export type AspectRatio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
@@ -194,6 +196,7 @@ export type RunEvent =
   | (RunEventBase & { type: "thinking.delta"; thoughtId: string; delta: string })
   | (RunEventBase & { type: "thinking.completed"; thoughtId: string })
   | (RunEventBase & { type: "message.delta"; delta: string })
+  | (RunEventBase & { type: "message.options"; options: string[] })
   | (RunEventBase & { type: "tool.started"; tool: ToolBlock })
   | (RunEventBase & {
       type: "tool.progress";

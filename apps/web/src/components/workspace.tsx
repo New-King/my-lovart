@@ -148,6 +148,8 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         updatedAt: at,
         content: message.content + event.delta,
       }));
+    case "message.options":
+      return patch((message) => ({ ...message, updatedAt: at, options: event.options }));
     case "tool.started":
       return patch((message) => ({
         ...message,
@@ -438,7 +440,7 @@ export function Workspace() {
   const handleSend = async (
     text: string,
     attachments: ChatAttachment[] = [],
-    aspectRatio: AspectRatio = "3:4",
+    aspectRatio?: AspectRatio,
   ): Promise<boolean> => {
     if (!activeId) return false;
     if (running) {
@@ -692,6 +694,9 @@ export function Workspace() {
           sending={running}
           onCreate={handleCreate}
           onSend={handleSend}
+          onQuickReply={(text) => {
+            void handleSend(text);
+          }}
           onStop={handleStop}
           onRetry={handleRetry}
           onAddToCanvas={handleAddToCanvas}

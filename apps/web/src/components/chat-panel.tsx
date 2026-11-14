@@ -38,6 +38,8 @@ type Props = {
     attachments: ChatAttachment[],
     aspectRatio: AspectRatio,
   ) => Promise<boolean>;
+  /** 点快捷选项：直接把选项原话发出去，不额外带画幅 */
+  onQuickReply: (text: string) => void;
   onStop: () => void;
   onRetry: () => void;
   onAddToCanvas: (block: ImageBlock) => void;
@@ -93,6 +95,7 @@ export function ChatPanel({
   sending,
   onCreate,
   onSend,
+  onQuickReply,
   onStop,
   onRetry,
   onAddToCanvas,
@@ -264,10 +267,11 @@ export function ChatPanel({
               disabled={sending}
               onCreate={onCreate}
               onUpload={() => composerRef.current?.openFilePicker()}
+              onPickStarter={(text) => composerRef.current?.setText(text)}
             />
           ) : (
             <div className="space-y-5">
-              {messages.map((message) =>
+              {messages.map((message, index) =>
                 message.role === "user" ? (
                   <div key={message.id} className="group flex flex-col items-end gap-1">
                     <div className="max-w-[85%] rounded-xl border border-line bg-surface px-3 py-2 text-[13px] leading-relaxed">
@@ -314,6 +318,26 @@ export function ChatPanel({
                         onAddReference={(item) => composerRef.current?.addReference(item)}
                       />
                     )}
+
+                    {message.options &&
+                      message.options.length > 0 &&
+                      index === messages.length - 1 &&
+                      message.status !== "streaming" &&
+                      message.status !== "queued" && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {message.options.map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => onQuickReply(option)}
+                              disabled={sending}
+                              className="max-w-full rounded-full border border-line bg-surface px-3 py-1.5 text-left text-[11.5px] leading-snug text-ink transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {option}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                     {message.status === "failed" && (
                       <div className="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger/5 px-2.5 py-2 text-[11.5px] text-danger">

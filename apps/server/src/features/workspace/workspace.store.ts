@@ -126,6 +126,18 @@ export function appendDelta(
   touch(message, at);
 }
 
+export function setMessageOptions(
+  projectId: string,
+  messageId: string,
+  options: string[],
+  at: string,
+): void {
+  const message = findMessage(projectId, messageId);
+  if (!message || options.length === 0) return;
+  message.options = options.slice(0, 6);
+  touch(message, at);
+}
+
 export function startThought(projectId: string, messageId: string, thought: Thought): void {
   const message = findMessage(projectId, messageId);
   if (!message) return;
