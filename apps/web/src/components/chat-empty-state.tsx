@@ -15,14 +15,14 @@ const STARTERS = [
   {
     icon: LayoutGrid,
     title: "做一张海报",
-    hint: "咖啡新品 · 秋季暖调 · 3:4",
+    hint: "咖啡新品 · 秋季暖调",
     prompt: "我想做一张咖啡店秋季新品海报，暖色调",
   },
   {
     icon: Clapperboard,
     title: "做一条短片",
-    hint: "产品宣传 · 16:9 横版",
-    prompt: "我想做一条产品宣传短视频，16:9 横版",
+    hint: "产品宣传 · 品牌氛围",
+    prompt: "我想做一条产品宣传短视频",
   },
   {
     icon: Sparkles,

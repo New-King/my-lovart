@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  AspectRatio,
   ChatBlock,
   ImageBlock,
   MessagePart,
@@ -38,7 +37,6 @@ type Props = {
   onSend: (
     text: string,
     attachments: ChatAttachment[],
-    aspectRatio: AspectRatio,
   ) => Promise<boolean>;
   /** 点快捷选项：直接把选项原话发出去，不额外带画幅 */
   onQuickReply: (text: string) => void;

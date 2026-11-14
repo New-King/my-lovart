@@ -461,7 +461,6 @@ export function Workspace() {
   const handleSend = async (
     text: string,
     attachments: ChatAttachment[] = [],
-    aspectRatio?: AspectRatio,
   ): Promise<boolean> => {
     if (!activeId) return false;
     if (running) {
@@ -490,7 +489,6 @@ export function Workspace() {
         projectId,
         kind: "auto",
         prompt,
-        aspectRatio,
         attachments,
       };
       if (wasDraft) {
@@ -507,7 +505,7 @@ export function Workspace() {
       const result = await runStream((onEvent, signal) =>
         sendMessageStream(
           projectId,
-          { text: prompt, attachments, aspectRatio },
+          { text: prompt, attachments },
           onEvent,
           signal,
         ),

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, ChevronDown, ImagePlus, Plus, Square } from "lucide-react";
+import { ArrowUp, ImagePlus, Plus, Square } from "lucide-react";
 import {
   forwardRef,
   useEffect,
@@ -12,7 +12,7 @@ import {
   type DragEvent,
 } from "react";
 import { useImageAttachments } from "@/hooks/use-image-attachments";
-import type { AspectRatio, ChatAttachment } from "@/lib/api";
+import type { ChatAttachment } from "@/lib/api";
 import type { ReferenceItem } from "@/lib/chat-references";
 import type { LibraryMaterial } from "@/lib/public-materials";
 import { AttachmentBar } from "./chat-attachments";
@@ -34,18 +34,9 @@ type Props = {
   onSend: (
     text: string,
     attachments: ChatAttachment[],
-    aspectRatio: AspectRatio,
   ) => Promise<boolean>;
   onStop: () => void;
 };
-
-const RATIOS: { value: AspectRatio; label: string }[] = [
-  { value: "1:1", label: "1:1 方形" },
-  { value: "4:3", label: "4:3 横版" },
-  { value: "3:4", label: "3:4 竖版" },
-  { value: "16:9", label: "16:9 宽屏" },
-  { value: "9:16", label: "9:16 竖屏" },
-];
 
 function hasFilePayload(event: DragEvent) {
   return Array.from(event.dataTransfer.types).includes("Files");
@@ -87,8 +78,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState(false);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
-  const [ratioMenuOpen, setRatioMenuOpen] = useState(false);
-  const [aspect, setAspect] = useState<AspectRatio>("3:4");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -177,7 +166,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
     if (!canSend) return;
 
     setUploadMenuOpen(false);
-    setRatioMenuOpen(false);
     setMentionQuery(null);
 
     const value = text.trim();
@@ -188,7 +176,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
 
     let ok = false;
     try {
-      ok = await onSend(value, images, aspect);
+      ok = await onSend(value, images);
     } catch {
       ok = false;
     }
@@ -402,39 +390,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
           </>
         )}
 
-        {ratioMenuOpen && (
-          <>
-            <button
-              type="button"
-              aria-label="关闭比例菜单"
-              onClick={() => setRatioMenuOpen(false)}
-              className="fixed inset-0 z-20 cursor-default"
-            />
-            <div className="absolute bottom-10 left-11 z-30 w-32 overflow-hidden rounded-xl border border-line bg-surface p-1.5 shadow-[0_18px_60px_-24px_rgba(24,24,27,0.4)]">
-              <p className="px-2 pb-1 pt-1 font-mono text-[9px] tracking-[0.16em] text-faint">
-                画面比例
-              </p>
-              {RATIOS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setAspect(option.value);
-                    setRatioMenuOpen(false);
-                    textareaRef.current?.focus();
-                  }}
-                  className={`flex h-8 w-full items-center justify-between rounded-lg px-2 text-[12px] transition-colors hover:bg-canvas ${
-                    option.value === aspect ? "text-ink" : "text-muted"
-                  }`}
-                >
-                  <span>{option.label}</span>
-                  {option.value === aspect && <span className="text-[10px] text-faint">当前</span>}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
         <textarea
           ref={textareaRef}
           rows={1}
@@ -493,26 +448,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
             >
               <Plus className="size-4" strokeWidth={1.75} />
             </button>
-            {!sending && (
-              <button
-                type="button"
-                onClick={() => setRatioMenuOpen((value) => !value)}
-                disabled={disabled}
-                aria-label={`画面比例 ${aspect}`}
-                title="画面比例"
-                className="inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-[10.5px] text-muted transition-colors hover:bg-canvas hover:text-ink disabled:opacity-40"
-              >
-                {aspect}
-                <ChevronDown className="size-3" strokeWidth={2} />
-              </button>
-            )}
-            <span className="hidden text-[10.5px] text-faint sm:inline">支持拖拽 / 粘贴</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden text-[10.5px] text-faint sm:inline">
-              {sending ? "生成中" : "⏎ 发送"}
-            </span>
             {sending ? (
               <button
                 type="button"
