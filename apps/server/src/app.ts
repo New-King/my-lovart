@@ -45,7 +45,7 @@ export function buildApp() {
   }
 
   registerProjectRoutes(app, repo);
-  registerWorkspaceRoutes(app);
+  registerWorkspaceRoutes(app, repo);
   registerFileRoutes(app);
 
   return app;

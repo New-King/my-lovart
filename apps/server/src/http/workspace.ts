@@ -10,6 +10,7 @@ import {
   normalizeAspect,
   normalizeAttachments,
 } from "../features/workspace/workspace.service.js";
+import type { ProjectsRepository } from "../features/projects/projects.repository.js";
 
 type Params = { projectId: string };
 
@@ -66,19 +67,37 @@ function openEventStream(request: FastifyRequest, reply: FastifyReply) {
   };
 }
 
-export function registerWorkspaceRoutes(app: FastifyInstance) {
+export function registerWorkspaceRoutes(
+  app: FastifyInstance,
+  projects: ProjectsRepository,
+) {
   const service = createWorkspaceService();
 
-  app.get<{ Params: Params }>("/workspace/:projectId", async (request) => {
-    await requireUserId(request);
+  /** workspace 走 service_role，必须自己校验项目归属 */
+  async function ownProject(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    projectId: string,
+  ): Promise<boolean> {
+    const userId = await requireUserId(request);
+    const project = await projects.find(userId, projectId);
+    if (!project) {
+      reply.code(404).send({ error: "项目不存在" });
+      return false;
+    }
+    return true;
+  }
+
+  app.get<{ Params: Params }>("/workspace/:projectId", async (request, reply) => {
+    if (!(await ownProject(request, reply, request.params.projectId))) return;
     return service.get(request.params.projectId);
   });
 
-  app.put<{ Params: Params; Body: { elements?: unknown; files?: unknown } }>(
+  app.post<{ Params: Params; Body: { elements?: unknown; files?: unknown } }>(
     "/workspace/:projectId/canvas",
     async (request, reply) => {
+      if (!(await ownProject(request, reply, request.params.projectId))) return;
       try {
-        await requireUserId(request);
         service.saveCanvas(
           request.params.projectId,
           request.body?.elements ?? [],
@@ -98,7 +117,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
   app.post<{ Params: Params; Body: MessageBody }>(
     "/workspace/:projectId/messages",
     async (request, reply) => {
-      await requireUserId(request);
+      if (!(await ownProject(request, reply, request.params.projectId))) return;
 
       const projectId = request.params.projectId;
       const body = request.body ?? {};
@@ -167,7 +186,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
   app.post<{ Params: Params; Body: GenerateBody }>(
     "/workspace/:projectId/generate",
     async (request, reply) => {
-      await requireUserId(request);
+      if (!(await ownProject(request, reply, request.params.projectId))) return;
 
       const projectId = request.params.projectId;
       const body = request.body ?? {};
