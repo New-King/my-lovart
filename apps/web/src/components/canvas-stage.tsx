@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   BookOpen,
   Download,
+  ImagePlus,
   LocateFixed,
   Loader2,
   Menu,
@@ -100,6 +101,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   const showToast = useToast();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragDepth = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const hydrated = useRef(false);
   const alive = useRef(true);
@@ -491,6 +493,28 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     void addFiles(files, point);
   }
 
+  function handleFilePick(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    const api = apiRef.current;
+    if (!api || !hydrated.current) {
+      showToast("error", "画布还在加载，请稍后再试");
+      return;
+    }
+
+    const appState = api.getAppState();
+    const point = viewportCoordsToSceneCoords(
+      {
+        clientX: appState.offsetLeft + appState.width / 2,
+        clientY: appState.offsetTop + appState.height / 2,
+      },
+      appState,
+    );
+    void addFiles(files, point);
+  }
+
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-canvas">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-2 lg:px-4">
@@ -519,6 +543,24 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={handleFilePick}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="插入图片"
+            aria-label="插入图片"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted transition-colors hover:bg-surface hover:text-ink"
+          >
+            <ImagePlus className="size-4" strokeWidth={1.75} />
+            <span className="hidden sm:inline">图片</span>
+          </button>
           <button
             type="button"
             onClick={onShowChat}
