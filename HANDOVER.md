@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-一个 AI 创作画布的首页 + 工作台：**登录是真的，项目数据落在 Postgres，画布和对话还在内存里，AI 还不会生成任何东西**。
+一个 AI 创作画布的首页 + 工作台：**登录是真的，项目数据落在 Postgres，对话和画布还在内存里。图片走 Volces Seedream、视频走 Metaso MiniMax H3，已经能真实生成并落盘。**
 
 ## 怎么跑
 
@@ -56,11 +56,27 @@ supabase        migrations
 
 ## 未实现（按优先级）
 
-1. **AI 不会出图/出视频**。没有任何 `generate_image` 之类的工具，Agent 只能在对话里给建议。这是产品最缺的一块，接了才算完整
-2. **画布和对话不持久**。`workspace.store.ts` 是内存 Map，服务重启清空。表已经建好（`canvases`、`sessions`、`messages`），接上即可
-3. 首页承诺了"图像、视频、版式"，但工作台只有对话
-4. 没有测试；`pnpm lint` 没跑过
-5. 部署没做（Dockerfile 没有）
+1. **画布和对话不持久**。`workspace.store.ts` 是内存 Map，服务重启清空。表已经建好（`canvases`、`sessions`、`messages`），接上即可；生成结果目前落在内存文件仓库，也需要迁到 Supabase Storage
+2. **生成结果 URL 只能活到进程重启**。`/files/:id` 是内存 Buffer，刷新页面没事，重启后旧消息里的图片会 404
+3. **还没有真正的 Agent 工具循环**。现在用关键词把消息分流到「聊天 / 生图 / 生视频」，模型还不能自己决定搜索灵感、连续调用工具
+4. 首页承诺了"图像、视频、版式"，视频已经能生成，但还没有视频入画布
+5. 没有测试；`pnpm lint` 没跑过
+6. 部署没做（Dockerfile 没有）
+
+## 真实生成配置
+
+`.env.local` 里已经加上（不要提交）：
+
+```
+GENERATION_MODE=real        # mock | real
+AGENT_MODE=llm              # 纯聊天走真实模型
+VOLCES_API_KEY=...          # Seedream 生图
+VOLCES_IMAGE_MODEL=doubao-seedream-5-0-260128
+METASO_API_KEY=...          # MiniMax H3 生视频
+METASO_VIDEO_MODEL=MiniMax-H3
+```
+
+`generationMode=real` 时，消息里出现生成意图（图片/视频关键词或带附件）就走真实 provider；否则走 LLM 聊天。生成结果会先下载进 `/files/:id`，避免供应商临时 URL 过期。
 
 ## 关键文件
 
