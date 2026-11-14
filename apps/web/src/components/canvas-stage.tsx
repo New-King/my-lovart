@@ -9,6 +9,7 @@ import {
   Menu,
   MessageSquare,
   PanelLeftOpen,
+  Rows3,
   Share2,
 } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
@@ -18,6 +19,7 @@ import type {
   ExcalidrawImperativeAPI,
 } from "@excalidraw/excalidraw/types";
 import {
+  arrangeCanvasImages,
   insertImageFileIntoCanvas,
   insertImageIntoCanvas,
   type CanvasImagePlacement,
@@ -56,6 +58,7 @@ export type CanvasStageHandle = {
     mimeType?: string;
     width?: number;
     height?: number;
+    batchId?: string;
   }) => Promise<void>;
 };
 
@@ -200,6 +203,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             mimeType: input.mimeType,
             width: input.width,
             height: input.height,
+            ...(input.batchId ? { batchId: input.batchId } : {}),
           },
           null,
         ),
@@ -370,6 +374,28 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             className="grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink lg:hidden"
           >
             <MessageSquare className="size-4" strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const api = apiRef.current;
+              if (!api || !hydrated.current) {
+                showToast("error", "画布还在加载，请稍后再试");
+                return;
+              }
+              const count = arrangeCanvasImages(api);
+              setShowReturn(false);
+              showToast(
+                count > 0 ? "success" : "info",
+                count > 0 ? `已重排 ${count} 张图片` : "画布上还没有图片",
+              );
+            }}
+            title="整理画布：按任务批次把图片排成一行行"
+            aria-label="整理画布"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted transition-colors hover:bg-surface hover:text-ink"
+          >
+            <Rows3 className="size-4" strokeWidth={1.75} />
+            <span className="hidden sm:inline">整理</span>
           </button>
           <button
             type="button"

@@ -325,6 +325,7 @@ export function Workspace() {
         mimeType: block.mimeType,
         width: block.width,
         height: block.height,
+        ...(block.batchId ? { batchId: block.batchId } : {}),
       });
     }
   }, []);
@@ -577,6 +578,7 @@ export function Workspace() {
       mimeType: block.mimeType,
       width: block.width,
       height: block.height,
+      ...(block.batchId ? { batchId: block.batchId } : {}),
     });
   };
 
