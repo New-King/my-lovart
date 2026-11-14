@@ -98,7 +98,8 @@
 
 ## Phase 5 · 可观测与评测
 
-- [ ] 结构化 trace：runId / threadId / toolCallId / 耗时 / 错误码
+- [x] 每 run JSONL trace：请求附件 → 归一化 → 视觉上下文 → 模型请求 → 工具 → 回答/错误（`.traces/`，`trace:latest`）
+- [x] `/health` 返回 pid / startedAt / traceDir，能确认请求打到哪个进程
 - [ ] golden 场景自动跑
 - [ ] LangSmith 可选，等需要系统调 prompt/工具时再接
 

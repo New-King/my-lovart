@@ -49,6 +49,9 @@ export async function normalizeAttachment(
 ): Promise<ChatAttachment | null> {
   const url = typeof input.url === "string" ? input.url : "";
   if (!url) return null;
+  // blob:/file: 只在本机这个页面进程里有效，服务端和模型都拿不到，
+  // 必须在客户端先转成 data URL；这里拒掉，避免静默变成「模型没收到图」。
+  if (url.startsWith("blob:") || url.startsWith("file:")) return null;
 
   const name = asString(input.name, "图片");
 

@@ -61,6 +61,13 @@ try {
     },
   ]);
   check("非图片附件不进入视觉上下文", pdf.xml === "" && Object.keys(pdf.map).length === 0);
+
+  // 素材库上传曾经用 blob: 地址，服务端和模型都拿不到；必须被拒，不能假装成功
+  const blob = await normalizeAttachments(
+    [{ id: "blob-1", name: "素材.png", mimeType: "image/png", url: "blob:http://localhost:3000/x", size: 0 }],
+    "http://127.0.0.1:3001",
+  );
+  check("blob: 附件被拒绝", blob.length === 0, JSON.stringify(blob));
 } catch (err) {
   console.error("ERROR", err instanceof Error ? err.message : err);
   process.exitCode = 1;

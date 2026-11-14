@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { APP_NAME } from "@my-lovart/shared";
 import { env } from "./lib/env.js";
+import { TRACE_DIR } from "./lib/trace.js";
 import { UnauthorizedError } from "./lib/auth.js";
 import { registerProjectRoutes } from "./http/projects.js";
 import { registerWorkspaceRoutes } from "./http/workspace.js";
@@ -14,6 +15,7 @@ import {
 export function buildApp() {
   // 附件以 base64 随消息上传，几张图就可能超过 1MB，放宽到 64MB
   const app = Fastify({ logger: true, bodyLimit: 64 * 1024 * 1024 });
+  const startedAt = new Date().toISOString();
 
   app.register(cors, { origin: env.webOrigins });
 
@@ -36,7 +38,12 @@ export function buildApp() {
     store: env.projectsStore,
     generation: env.generationMode,
     uptime: Math.round(process.uptime()),
+    pid: process.pid,
+    startedAt,
+    traceDir: TRACE_DIR,
   }));
+
+  app.log.info({ traceDir: TRACE_DIR, pid: process.pid }, "运行 trace 已启用");
 
   const repo =
     env.projectsStore === "supabase" ? createSupabaseProjectsRepository() : createMemoryProjectsRepository();

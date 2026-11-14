@@ -7,6 +7,7 @@ import type {
   RunEvent,
 } from "@my-lovart/shared";
 import { env } from "../../lib/env.js";
+import { createTrace } from "../../lib/trace.js";
 import { normalizeAttachment } from "../files/file.store.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
 import {
@@ -50,6 +51,10 @@ export type RunInput = {
   userMessageId?: string;
   /** 服务端自己的公开地址，用于把生成结果落成 /files/:id */
   baseUrl?: string;
+  /** 请求侧看到的原始附件数量；和归一化结果对不上时用于定位 */
+  rawAttachmentCount?: number;
+  /** Fastify 的 requestId，方便和服务端日志对齐 */
+  requestId?: string;
 };
 
 const ASPECTS: AspectRatio[] = ["1:1", "4:3", "3:4", "16:9", "9:16"];
@@ -185,6 +190,31 @@ export function createWorkspaceService(
         }))
         .filter((message) => message.content);
 
+      const trace = createTrace(runId, {
+        projectId,
+        messageId,
+        requestId: input.requestId,
+        kind: input.kind,
+        text: input.text.slice(0, 500),
+        rawAttachmentCount: input.rawAttachmentCount ?? 0,
+        inputAttachments: (input.attachments ?? []).map((attachment) => ({
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          urlKind: attachment.url.startsWith("data:")
+            ? "data-url"
+            : attachment.url.includes("/files/")
+              ? "local-file"
+              : "remote-url",
+        })),
+        historyCount: history.length,
+        history: history.map((message) => ({
+          role: message.role,
+          preview: message.content.slice(0, 120),
+        })),
+      });
+
       try {
         if (env.generationMode === "real") {
           const baseUrl = input.baseUrl ?? `http://127.0.0.1:${env.port}`;
@@ -228,12 +258,14 @@ export function createWorkspaceService(
             canvasFiles: ensureWorkspace(projectId).files,
             baseUrl,
             signal,
+            trace,
           })) {
             applyEvent(projectId, messageId, event);
             const terminal =
               event.type === "run.completed" ||
               event.type === "run.canceled" ||
               event.type === "run.failed";
+            trace.event("run.event", summarizeEvent(event));
             if (terminal) await persistMessage(repo, projectId, messageId);
             yield event;
             if (terminal) return;
@@ -256,6 +288,7 @@ export function createWorkspaceService(
             event.type === "run.completed" ||
             event.type === "run.canceled" ||
             event.type === "run.failed";
+          trace.event("run.event", summarizeEvent(event));
           if (terminal) await persistMessage(repo, projectId, messageId);
           yield event;
           if (terminal) return;
@@ -266,6 +299,10 @@ export function createWorkspaceService(
           message: err instanceof Error ? err.message : "生成失败",
           retriable: true,
         };
+        trace.event("run.error", {
+          message: error.message,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
         finishMessage(projectId, messageId, "failed", new Date().toISOString(), error);
         await persistMessage(repo, projectId, messageId);
         yield {
@@ -285,9 +322,30 @@ export function createWorkspaceService(
           finishMessage(projectId, messageId, "canceled", new Date().toISOString());
           await persistMessage(repo, projectId, messageId);
         }
+        trace.event("run.finally", { status: message?.status ?? "unknown" });
       }
     },
   };
+}
+
+function summarizeEvent(event: RunEvent): Record<string, unknown> {
+  const base = { type: event.type };
+  switch (event.type) {
+    case "message.delta":
+      return { ...base, chars: event.delta.length };
+    case "message.options":
+      return { ...base, options: event.options };
+    case "tool.started":
+      return { ...base, tool: event.tool.tool, title: event.tool.title };
+    case "tool.failed":
+      return { ...base, error: event.error.message.slice(0, 300) };
+    case "run.failed":
+      return { ...base, error: event.error };
+    case "artifact.ready":
+      return { ...base, kind: event.artifact.type, id: event.artifact.id };
+    default:
+      return base;
+  }
 }
 
 /**

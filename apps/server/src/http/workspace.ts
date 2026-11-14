@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ChatMessage, RunEvent } from "@my-lovart/shared";
 import { env } from "../lib/env.js";
 import { requireUserId } from "../lib/auth.js";
+import { createTrace } from "../lib/trace.js";
 import { LlmError } from "../lib/llm.js";
 import {
   MESSAGE_MAX,
@@ -24,6 +25,29 @@ type GenerateBody = {
 
 function baseUrlFor(request: FastifyRequest): string {
   return `${request.protocol}://${request.headers.host ?? `127.0.0.1:${env.port}`}`;
+}
+
+/** trace 用：只保留附件类型和地址种类，不落 base64。 */
+function summarizeRawAttachments(raw: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 8).map((item) => {
+    const value = (item ?? {}) as Record<string, unknown>;
+    const url = typeof value.url === "string" ? value.url : "";
+    return {
+      name: value.name,
+      mimeType: value.mimeType,
+      size: value.size,
+      urlKind: url.startsWith("data:")
+        ? "data-url"
+        : url.startsWith("blob:")
+          ? "blob"
+          : url.includes("/files/")
+            ? "local-file"
+            : url
+              ? "remote-url"
+              : "empty",
+    };
+  });
 }
 
 /**
@@ -136,6 +160,12 @@ export function registerWorkspaceRoutes(
         // 宁可明确报错，也不要把一张读不出来的图静默降级成纯文本，
         // 否则用户看到的是「我没收到任何图片」。
         if (attachments.length === 0) {
+          const trace = createTrace(`reject-${request.id}`, {
+            projectId,
+            requestId: request.id,
+            rawAttachments: summarizeRawAttachments(body.attachments),
+          });
+          trace.event("attachments.rejected", { reason: "附件全部无法归一化" });
           return reply.code(400).send({ error: "图片附件读取失败，请重新上传" });
         }
       }
@@ -169,6 +199,8 @@ export function registerWorkspaceRoutes(
             attachments,
             userMessageId: userMessage.id,
             baseUrl: baseUrlFor(request),
+            rawAttachmentCount: rawAttachments,
+            requestId: request.id,
           },
           controller.signal,
         )) {
@@ -222,7 +254,7 @@ export function registerWorkspaceRoutes(
       try {
         for await (const event of service.run(
           projectId,
-          { text: prompt, kind, aspectRatio, attachments, baseUrl: baseUrlFor(request) },
+          { text: prompt, kind, aspectRatio, attachments, baseUrl: baseUrlFor(request), rawAttachmentCount: rawAttachments, requestId: request.id },
           controller.signal,
         )) {
           if (!stream.send(event)) break;

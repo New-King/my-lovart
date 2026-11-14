@@ -42,6 +42,40 @@ function hasFilePayload(event: DragEvent) {
   return Array.from(event.dataTransfer.types).includes("Files");
 }
 
+/**
+ * blob: 地址离开页面就失效，服务端拿不到图。
+ * 发送前统一转成 data URL，素材库/画布引用都走同一条路。
+ */
+async function toSendableAttachments(
+  items: ChatAttachment[],
+): Promise<ChatAttachment[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      if (!item.url.startsWith("blob:")) return item;
+      try {
+        const blob = await fetch(item.url).then((res) => res.blob());
+        const url = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            typeof reader.result === "string"
+              ? resolve(reader.result)
+              : reject(new Error("读取失败"));
+          reader.onerror = () => reject(reader.error ?? new Error("读取失败"));
+          reader.readAsDataURL(blob);
+        });
+        return {
+          ...item,
+          url,
+          mimeType: blob.type || item.mimeType,
+          size: blob.size || item.size,
+        };
+      } catch {
+        return item;
+      }
+    }),
+  );
+}
+
 function ReferenceRow({
   item,
   active,
@@ -170,7 +204,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
 
     const value = text.trim();
     const snapshot = attachments;
-    const images = readyAttachments;
+    const images = await toSendableAttachments(readyAttachments);
     setText("");
     clearAll();
 

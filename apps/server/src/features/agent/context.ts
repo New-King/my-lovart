@@ -1,11 +1,23 @@
 import type { ChatAttachment } from "@my-lovart/shared";
 import { fileDataUrlFromUrl } from "../files/file.store.js";
 
+export type AgentAttachmentItem = {
+  assetId: string;
+  name: string;
+  mimeType: string;
+  status: "resolved" | "unavailable";
+  source: "data-url" | "local-file" | "remote-url";
+  /** resolved 时是 data URL 字符数，用来判断有没有真的拿到图 */
+  bytes?: number;
+};
+
 export type AgentAttachmentContext = {
   /** assetId → 可直接给 provider 的地址（data URL 或公网 URL） */
   map: Record<string, string>;
   /** 注入给模型的 XML，只描述可用素材，不塞 base64 */
   xml: string;
+  /** trace 用：每个附件最终有没有读到，不携带图片内容 */
+  items: AgentAttachmentItem[];
 };
 
 export type CanvasElementBrief = {
@@ -45,8 +57,7 @@ export async function buildAttachmentContext(
 ): Promise<AgentAttachmentContext> {
   const map: Record<string, string> = {};
   const lines: string[] = [];
-
-  let unavailable = 0;
+  const items: AgentAttachmentItem[] = [];
 
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment.mimeType.startsWith("image/")) continue;
@@ -56,14 +67,28 @@ export async function buildAttachmentContext(
     if (!resolved) {
       // 附件在列表里，但文件读不出来：明确告诉模型「收到了一张图但打不开」，
       // 否则模型会回答「我没收到任何图片」，用户以为附件丢了。
-      unavailable += 1;
       lines.push(
         `  <image index="${index + 1}" asset_id="${assetId}" mime_type="${escapeXml(attachment.mimeType)}" name="${escapeXml(attachment.name)}" status="unavailable" />`,
       );
+      items.push({
+        assetId,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        status: "unavailable",
+        source: sourceOf(attachment.url),
+      });
       continue;
     }
 
     map[assetId] = resolved;
+    items.push({
+      assetId,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      status: "resolved",
+      source: sourceOf(attachment.url),
+      bytes: resolved.length,
+    });
     lines.push(
       `  <image index="${index + 1}" asset_id="${assetId}" mime_type="${escapeXml(attachment.mimeType)}" name="${escapeXml(attachment.name)}" />`,
     );
@@ -71,11 +96,18 @@ export async function buildAttachmentContext(
 
   return {
     map,
+    items,
     xml:
       lines.length > 0
         ? `<input_images count="${lines.length}">\n${lines.join("\n")}\n</input_images>`
         : "",
   };
+}
+
+function sourceOf(url: string): AgentAttachmentItem["source"] {
+  if (url.startsWith("data:")) return "data-url";
+  if (url.includes("/files/")) return "local-file";
+  return "remote-url";
 }
 
 async function resolveReference(url: string): Promise<string | undefined> {

@@ -9,3 +9,6 @@ dist/
 
 # build artifacts
 *.tsbuildinfo
+
+# 本地运行 trace（每次 run 一个 JSONL）
+.traces/

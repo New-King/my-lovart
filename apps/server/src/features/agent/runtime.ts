@@ -12,6 +12,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { createDeepAgent } from "deepagents";
 import { randomUUID } from "node:crypto";
 import { env } from "../../lib/env.js";
+import type { Trace } from "../../lib/trace.js";
 import { AgentEventBus } from "./bus.js";
 import { buildAttachmentContext, buildCanvasContext } from "./context.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
@@ -31,6 +32,7 @@ export type AgentRunInput = {
   canvasFiles: Record<string, unknown>;
   baseUrl: string;
   signal: AbortSignal;
+  trace?: Trace;
 };
 
 type Payload<T> = T extends unknown ? Omit<T, "runId" | "messageId" | "seq" | "at"> : never;
@@ -67,6 +69,14 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   const bus = new AgentEventBus();
   const attachmentContext = await buildAttachmentContext(input.attachments);
   const canvasContext = buildCanvasContext(input.canvasElements, input.canvasFiles);
+  input.trace?.event("agent.context", {
+    attachments: attachmentContext.items,
+    visionCount: Object.keys(attachmentContext.map).length,
+    attachmentXml: attachmentContext.xml,
+    canvasElementCount: canvasContext.elements.length,
+    canvasSummary: canvasContext.summary,
+    canvasXml: canvasContext.xml,
+  });
   const tools = createAgentTools({
     bus,
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
@@ -105,6 +115,16 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     buildHumanMessage(userText, attachmentContext.map),
   ];
 
+  input.trace?.event("model.request", {
+    model: env.agentModel,
+    historyCount: input.history.length,
+    messageCount: messages.length,
+    visionCount: Object.keys(attachmentContext.map).length,
+    userText,
+    messageRoles: input.history.map((message) => message.role),
+  });
+
+  let answerText = "";
   let activeTool: { toolCallId: string } | null = null;
 
   try {
@@ -115,6 +135,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
     for await (const item of mergeWithBus(stream, bus)) {
       if (input.signal.aborted) {
+        input.trace?.event("run.canceled", { answer: answerText.slice(-2000) });
         yield emit({ type: "run.canceled" });
         return;
       }
@@ -140,12 +161,16 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
         // 推理模型的原始 chain-of-thought 不直接展示给用户；
         // 用户能看到的是模型自己写给用户的计划与结果说明。
         const text = readChunkText(chunk);
-        if (text) yield emit({ type: "message.delta", delta: text });
+        if (text) {
+          answerText += text;
+          yield emit({ type: "message.delta", delta: text });
+        }
         continue;
       }
 
       if (event.event === "on_tool_start") {
         const name = event.name ?? "";
+        input.trace?.event("tool.start", { name, input: event.data?.input });
 
         if (name === "manipulate_canvas") {
           const toolCallId = event.run_id ?? randomUUID();
@@ -194,6 +219,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_end") {
         const name = event.name ?? "";
+        input.trace?.event("tool.end", { name, output: event.data?.output });
 
         if (name === "offer_choices") {
           const parsed = parseToolOutput(event.data?.output);
@@ -292,6 +318,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_error") {
         const name = event.name ?? "";
+        input.trace?.event("tool.error", { name, error: event.data?.error });
         if (
           name !== "generate_image" &&
           name !== "generate_video" &&
@@ -315,10 +342,12 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     }
 
     if (input.signal.aborted) {
+      input.trace?.event("run.canceled", { answer: answerText.slice(-2000) });
       yield emit({ type: "run.canceled" });
       return;
     }
 
+    input.trace?.event("run.completed", { answer: answerText.slice(-4000) });
     yield emit({ type: "run.completed" });
   } catch (error) {
     if (input.signal.aborted) {
@@ -331,6 +360,11 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       message: errorMessage(error),
       retriable: true,
     };
+    input.trace?.event("run.error", {
+      message: runError.message,
+      stack: error instanceof Error ? error.stack : undefined,
+      answerSoFar: answerText.slice(-2000),
+    });
     if (activeTool) {
       yield emit({ type: "tool.failed", toolCallId: activeTool.toolCallId, error: runError });
     }

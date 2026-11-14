@@ -15,7 +15,9 @@ export async function uploadMaterial(file: File): Promise<LibraryMaterial> {
   const material: LibraryMaterial = {
     id: `uploaded-${Date.now()}-${uploadCount}`,
     name: file.name.replace(/\.[^.]+$/, "") || "未命名素材",
-    url: URL.createObjectURL(file),
+    // 必须用 data URL：blob: 只在当前页面的内存里有效，
+    // 发给服务端后既存不下来，也没法交给模型看。
+    url: await fileToDataUrl(file),
     mimeType: file.type || "image/png",
     width: 0,
     height: 0,
@@ -25,11 +27,21 @@ export async function uploadMaterial(file: File): Promise<LibraryMaterial> {
   return material;
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("读取失败"));
+    reader.onerror = () => reject(reader.error ?? new Error("读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function deleteMaterial(id: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 200));
   const index = uploadedMaterials.findIndex((item) => item.id === id);
   const material = index === -1 ? undefined : uploadedMaterials[index];
   if (!material) return;
-  URL.revokeObjectURL(material.url);
+  if (material.url.startsWith("blob:")) URL.revokeObjectURL(material.url);
   uploadedMaterials.splice(index, 1);
 }
