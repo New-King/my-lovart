@@ -31,6 +31,22 @@ export function registerProjectRoutes(app: FastifyInstance, repo: ProjectsReposi
     }
   });
 
+  /** 首次产生内容时根据 prompt 自动命名；已经手动改过名的会原样返回 */
+  app.post<{ Params: Params; Body: { prompt?: unknown } }>(
+    "/projects/:id/auto-name",
+    async (request, reply) => {
+      const prompt = typeof request.body?.prompt === "string" ? request.body.prompt.trim() : "";
+      if (!prompt) return reply.code(400).send({ error: "缺少 prompt" });
+      const project = await service.autoName(
+        await requireUserId(request),
+        request.params.id,
+        prompt,
+      );
+      if (!project) return reply.code(404).send({ error: "项目不存在" });
+      return project;
+    },
+  );
+
   app.delete<{ Params: Params }>("/projects/:id", async (request, reply) => {
     const ok = await service.remove(await requireUserId(request), request.params.id);
     if (!ok) return reply.code(404).send({ error: "项目不存在" });

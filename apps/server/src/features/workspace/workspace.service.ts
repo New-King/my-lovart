@@ -120,6 +120,15 @@ export function createWorkspaceService() {
       const messageId = randomUUID();
       startAssistantMessage(projectId, messageId);
 
+      const history = ensureWorkspace(projectId).messages
+        .filter((message) => message.status !== "queued" && message.status !== "streaming")
+        .slice(-MAX_CONTEXT_MESSAGES)
+        .map((message) => ({
+          role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
+          content: message.content,
+        }))
+        .filter((message) => message.content);
+
       try {
         const wantsMedia =
           input.kind === "image" ||
@@ -139,6 +148,7 @@ export function createWorkspaceService() {
             attachments: input.attachments ?? [],
             signal,
             baseUrl,
+            history,
           })) {
             applyEvent(projectId, messageId, event);
             yield event;

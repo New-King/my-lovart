@@ -10,6 +10,7 @@ export type Project = {
 
 export type ProjectsRepository = {
   list(userId: string): Promise<Project[]>;
+  find(userId: string, id: string): Promise<Project | null>;
   create(userId: string, name: string): Promise<Project>;
   rename(userId: string, id: string, name: string): Promise<Project | null>;
   remove(userId: string, id: string): Promise<boolean>;
@@ -31,6 +32,13 @@ export function createMemoryProjectsRepository(): ProjectsRepository {
       const now = new Date().toISOString();
       const row = { id: randomUUID(), userId, name, createdAt: now, updatedAt: now };
       rows.set(row.id, row);
+      const { userId: _ignored, ...project } = row;
+      return project;
+    },
+
+    async find(userId, id) {
+      const row = rows.get(id);
+      if (!row || row.userId !== userId) return null;
       const { userId: _ignored, ...project } = row;
       return project;
     },
@@ -90,6 +98,17 @@ export function createSupabaseProjectsRepository(): ProjectsRepository {
         .single();
       if (error) throw error;
       return toProject(data as ProjectRow);
+    },
+
+    async find(userId, id) {
+      const { data, error } = await db()
+        .from("projects")
+        .select("id, name, created_at, updated_at")
+        .eq("id", id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? toProject(data as ProjectRow) : null;
     },
 
     async rename(userId, id, name) {

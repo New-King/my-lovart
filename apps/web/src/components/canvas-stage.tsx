@@ -98,6 +98,45 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   const hydrated = useRef(false);
   const alive = useRef(true);
   const lastSaved = useRef("");
+  /** 框选矩形（场景坐标），pointerup 后用来做「相交即选中」 */
+  const selectionBox = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const preSelection = useRef<Record<string, true>>({});
+  /** 原生图片工具选完文件后会进入待落位状态，这里直接接管 */
+  const placingPending = useRef(false);
+
+  const installSelectionGuards = useCallback((api: ExcalidrawImperativeAPI) => {
+    api.onPointerDown((tool) => {
+      if (tool.type === "selection") {
+        preSelection.current = { ...api.getAppState().selectedElementIds };
+      }
+    });
+
+    api.onPointerUp((tool, _state, event) => {
+      if (tool.type !== "selection") return;
+      const box = selectionBox.current;
+      selectionBox.current = null;
+      if (!box) return;
+
+      // 等 Excalidraw 自己先完成「完全包裹」的选中，再补上相交的元素
+      window.setTimeout(() => {
+        if (!alive.current || apiRef.current !== api) return;
+        const base = (event as PointerEvent).shiftKey ? preSelection.current : {};
+        const selected: Record<string, true> = { ...base };
+        for (const element of api.getSceneElements()) {
+          if (element.isDeleted) continue;
+          if (
+            element.x < box.x + box.width &&
+            element.x + element.width > box.x &&
+            element.y < box.y + box.height &&
+            element.y + element.height > box.y
+          ) {
+            selected[element.id] = true;
+          }
+        }
+        api.updateScene({ appState: { selectedElementIds: selected } });
+      }, 0);
+    });
+  }, []);
 
   useEffect(() => {
     alive.current = true;
@@ -139,6 +178,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
       apiRef.current = api;
       hydrated.current = false;
       lastSaved.current = "";
+      installSelectionGuards(api);
 
       if (elements.length === 0) {
         hydrated.current = true;
@@ -160,7 +200,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
         updateVisibility(api);
       }, 100);
     },
-    [elements, files, updateVisibility],
+    [elements, files, updateVisibility, installSelectionGuards],
   );
 
   const addChatImage = useCallback(
@@ -453,9 +493,68 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             langCode="zh-CN"
             initialData={{ elements: [] }}
             excalidrawAPI={handleApi}
-            onChange={(next, _appState, nextFiles) => {
+            onChange={(next, appState, nextFiles) => {
               if (!alive.current || !hydrated.current) return;
-              if (apiRef.current) updateVisibility(apiRef.current);
+              const api = apiRef.current;
+              if (!api) return;
+
+              // 记录框选矩形，pointerup 时用来做相交选中
+              const selection = appState.selectionElement;
+              if (selection && (selection.width > 2 || selection.height > 2)) {
+                selectionBox.current = {
+                  x: selection.x,
+                  y: selection.y,
+                  width: selection.width,
+                  height: selection.height,
+                };
+              }
+
+              // 原生图片工具：选完文件后不要再让用户点一下，直接放到视口中心
+              if (appState.pendingImageElementId && !placingPending.current) {
+                const pendingId = appState.pendingImageElementId;
+                const pending = next.find((element) => element.id === pendingId);
+                if (pending) {
+                  placingPending.current = true;
+                  const center = viewportCoordsToSceneCoords(
+                    {
+                      clientX: appState.offsetLeft + appState.width / 2,
+                      clientY: appState.offsetTop + appState.height / 2,
+                    },
+                    appState,
+                  );
+                  const scale = Math.min(1, 400 / pending.width, 500 / pending.height);
+                  const width = Math.max(1, Math.round(pending.width * scale));
+                  const height = Math.max(1, Math.round(pending.height * scale));
+                  api.updateScene({
+                    elements: next.map((element) =>
+                      element.id === pendingId
+                        ? {
+                            ...element,
+                            x: center.x - width / 2,
+                            y: center.y - height / 2,
+                            width,
+                            height,
+                            status: "saved" as const,
+                            version: element.version + 1,
+                            versionNonce: Math.floor(Math.random() * 2_000_000_000),
+                            updated: Date.now(),
+                          }
+                        : element,
+                    ),
+                    appState: {
+                      pendingImageElementId: null,
+                    },
+                    captureUpdate: "IMMEDIATELY",
+                  });
+                  api.setActiveTool({ type: "selection" });
+                  window.setTimeout(() => {
+                    placingPending.current = false;
+                  }, 60);
+                  return;
+                }
+              }
+
+              updateVisibility(api);
 
               const filesSignature = Object.values(nextFiles)
                 .map((file) => `${file.id}:${file.dataURL.length}`)

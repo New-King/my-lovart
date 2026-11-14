@@ -1,6 +1,7 @@
 "use client";
 
 import { deleteMaterial, fetchMaterials, uploadMaterial } from "@/lib/materials-api";
+import { guessMimeTypeFromUrl, setChatImageDragData } from "@/lib/chat-canvas-drag";
 import type { LibraryMaterial } from "@/lib/public-materials";
 import { Loader2, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -20,23 +21,44 @@ type CardProps = {
 };
 
 function MaterialCard({ material, canDelete, onSelect, onDelete }: CardProps) {
+  const mimeType = material.mimeType || guessMimeTypeFromUrl(material.url);
+
   return (
     <div className="group relative">
       <button
         type="button"
         onClick={() => onSelect(material)}
-        className="w-full overflow-hidden rounded-lg border border-line bg-surface text-left transition-colors hover:border-accent/30"
+        draggable
+        onDragStart={(event) =>
+          setChatImageDragData(event, {
+            url: material.url,
+            title: material.name,
+            mimeType,
+            ...(material.width > 0 ? { width: material.width } : {}),
+            ...(material.height > 0 ? { height: material.height } : {}),
+          })
+        }
+        className="w-full cursor-grab overflow-hidden rounded-lg border border-line bg-surface text-left transition-colors hover:border-accent/30 active:cursor-grabbing"
       >
         <img
           src={material.url}
           alt={material.name}
+          draggable={false}
           className="aspect-[4/3] w-full object-cover transition-opacity group-hover:opacity-90"
         />
         <div className="px-1.5 py-1">
           <p className="truncate text-[11.5px] text-ink">{material.name}</p>
-          <p className="text-[10px] text-faint">加入对话</p>
+          <p className="text-[10px] text-faint">单击加入对话 · 拖到画布</p>
         </div>
       </button>
+
+      <span
+        aria-hidden
+        className="pointer-events-none absolute left-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-ink/65 text-white opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-hover:opacity-100"
+      >
+        <Plus className="size-3.5" strokeWidth={2} />
+      </span>
+
       {canDelete && onDelete && (
         <button
           type="button"
@@ -114,7 +136,7 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
         type="button"
         aria-label="关闭素材库"
         onClick={onClose}
-        className="fixed inset-0 z-40 cursor-default bg-ink/10"
+        className="fixed inset-0 z-40 cursor-default bg-ink/10 lg:hidden"
       />
       <aside
         aria-label="素材库面板"

@@ -18,6 +18,7 @@ import {
   type VideoGenerationResult,
 } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
+import { chat } from "../../lib/llm.js";
 
 export type RealKind = "auto" | "image" | "video";
 
@@ -30,17 +31,10 @@ export type RealRunInput = {
   attachments: ChatAttachment[];
   signal: AbortSignal;
   baseUrl: string;
+  history: { role: "user" | "assistant"; content: string }[];
 };
 
 type Payload<T> = T extends unknown ? Omit<T, "runId" | "messageId" | "seq" | "at"> : never;
-
-const RATIO_LABELS: Record<AspectRatio, string> = {
-  "1:1": "方形",
-  "4:3": "横版",
-  "3:4": "竖版",
-  "16:9": "宽屏",
-  "9:16": "竖屏",
-};
 
 export function looksLikeVideo(text: string): boolean {
   return /视频|短片|分镜|动效|动画|motion|video/i.test(text);
@@ -82,20 +76,28 @@ export async function* createRealRun(input: RealRunInput): AsyncGenerator<RunEve
   };
   yield emit({ type: "step.started", step: understand });
 
-  const thoughtA = randomUUID();
-  yield emit({ type: "thinking.started", thoughtId: thoughtA, startedAt: new Date().toISOString() });
-  yield emit({
-    type: "thinking.delta",
-    thoughtId: thoughtA,
-    delta: `${RATIO_LABELS[aspect]}构图，${references.length > 0 ? `参考 ${references.length} 张图` : "纯文字描述"}；先把主视觉定下来，再补细节。`,
-  });
-  yield emit({ type: "thinking.completed", thoughtId: thoughtA });
-  await sleep(120, input.signal);
+  const plan = await safeChat([
+    {
+      role: "system",
+      content:
+        "你是 mylovart 画布里的 AI 设计助手。根据用户这次的需求，用 1-2 句中文写出你打算怎么生成：比例、构图、风格、是否参考图。不要客套，不要说「好的」「没问题」，不要声称已经生成，不要重复用户原话。只输出正文。",
+    },
+    ...input.history,
+    {
+      role: "user",
+      content: `${input.text || "参考图生成"}\n\n这次生成：${isVideo ? "视频" : "图片"}，比例 ${aspect}${references.length > 0 ? `，有 ${references.length} 张参考图` : "，没有参考图"}。`,
+    },
+  ]);
 
-  const summary = videoReply(input.text, aspect);
-  for (const chunk of splitReply(summary)) {
-    yield emit({ type: "message.delta", delta: chunk });
-    await sleep(90, input.signal);
+  if (plan) {
+    const thoughtA = randomUUID();
+    yield emit({
+      type: "thinking.started",
+      thoughtId: thoughtA,
+      startedAt: new Date().toISOString(),
+    });
+    yield emit({ type: "thinking.delta", thoughtId: thoughtA, delta: plan });
+    yield emit({ type: "thinking.completed", thoughtId: thoughtA });
   }
 
   yield emit({
@@ -113,17 +115,6 @@ export async function* createRealRun(input: RealRunInput): AsyncGenerator<RunEve
     startedAt: new Date().toISOString(),
   };
   yield emit({ type: "step.started", step: generate });
-
-  const thoughtB = randomUUID();
-  yield emit({ type: "thinking.started", thoughtId: thoughtB, startedAt: new Date().toISOString() });
-  yield emit({
-    type: "thinking.delta",
-    thoughtId: thoughtB,
-    delta: isVideo
-      ? "镜头按 8 秒处理：慢起、推进、定格收尾，先把动态预览跑出来。"
-      : `Seedream 按 ${aspect} 出图，${references.length > 0 ? "把参考图作为 image 输入" : "只给文字 prompt"}。`,
-  });
-  yield emit({ type: "thinking.completed", thoughtId: thoughtB });
 
   yield emit({
     type: "tool.started",
@@ -207,6 +198,26 @@ export async function* createRealRun(input: RealRunInput): AsyncGenerator<RunEve
   }
 
   yield emit({ type: "artifact.ready", artifact });
+
+  const reply = await safeChat([
+    {
+      role: "system",
+      content:
+        "你是 mylovart 画布里的 AI 设计助手。生成任务刚刚完成，请用 1-3 句自然的中文回复：说明你生成了什么、画面里你控制的关键点，再给一个具体的下一步建议。不要模板化开头，不要重复用户原话，不要声称看到了模型没给你的细节，只输出正文。",
+    },
+    ...input.history,
+    {
+      role: "user",
+      content: `${input.text || "参考图生成"}\n\n工具已完成：${artifact.type === "image" ? "生成图片" : "生成视频"}，${artifact.width}×${artifact.height}，模型 ${artifact.model}${artifact.type === "video" ? `，${artifact.durationSeconds} 秒` : ""}。`,
+    },
+  ]);
+
+  if (reply) {
+    for (const chunk of splitReply(reply)) {
+      yield emit({ type: "message.delta", delta: chunk });
+      await sleep(70, input.signal);
+    }
+  }
 
   yield emit({
     type: "tool.completed",
@@ -332,12 +343,15 @@ function buildPrompt(text: string, aspect: AspectRatio, video: boolean): string 
   return `${base}\n画面比例 ${aspect}。${video ? "镜头稳定，节奏干净。" : "构图完整，留白克制，细节清晰。"}`;
 }
 
-function videoReply(text: string, aspect: AspectRatio): string {
-  const ratio = RATIO_LABELS[aspect];
-  if (looksLikeVideo(text)) {
-    return `按 ${ratio}处理，先给你一版 8 秒动态预览：起幅慢、推进稳、结尾定格。镜头和节奏先立住，再逐段调节奏。`;
+async function safeChat(
+  messages: Parameters<typeof chat>[0],
+): Promise<string> {
+  try {
+    return (await chat(messages)).trim();
+  } catch {
+    // 文案生成失败不应该让已经成功的生成任务变成失败
+    return "";
   }
-  return `按 ${ratio}方向出一版：先把主视觉和留白定下来，细节等构图确认后再补。`;
 }
 
 function splitReply(text: string): string[] {

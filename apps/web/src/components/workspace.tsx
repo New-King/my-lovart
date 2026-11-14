@@ -13,10 +13,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/auth";
 import {
+  autoNameProject,
   createProject,
+  deleteProject,
   generateStream,
   getWorkspace,
   listProjects,
+  renameProject,
   saveCanvas,
   sendMessageStream,
   type Project,
@@ -457,8 +460,9 @@ export function Workspace() {
     setData((prev) => (prev ? { ...prev, messages: [...prev.messages, optimistic] } : prev));
 
     try {
-      // 第一句话就是项目名，避免左栏堆一排「未命名项目」
-      const projectId = await ensureProject(prompt.slice(0, 18));
+      // 第一句话不直接截断成名字，先创建，再让模型起一个短名字
+      const wasDraft = activeId.startsWith(DRAFT_PREFIX);
+      const projectId = await ensureProject();
       lastRunRef.current = {
         projectId,
         kind: "auto",
@@ -466,6 +470,17 @@ export function Workspace() {
         aspectRatio,
         attachments,
       };
+      if (wasDraft) {
+        void autoNameProject(projectId, prompt)
+          .then((project) => {
+            setProjects((prev) =>
+              prev.map((item) => (item.id === project.id ? project : item)),
+            );
+          })
+          .catch(() => {
+            // 命名失败不影响生成，左栏保留默认名
+          });
+      }
       const result = await runStream((onEvent, signal) =>
         sendMessageStream(
           projectId,
@@ -583,12 +598,45 @@ export function Workspace() {
     });
   };
 
+  const handleRenameProject = async (id: string, name: string) => {
+    try {
+      const project = await renameProject(id, name);
+      setProjects((prev) => prev.map((item) => (item.id === project.id ? project : item)));
+      toast("success", "项目已重命名");
+    } catch {
+      toast("error", "重命名失败，请重试");
+      throw new Error("rename failed");
+    }
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      await deleteProject(id);
+    } catch {
+      toast("error", "删除失败，请重试");
+      throw new Error("delete failed");
+    }
+
+    setProjects((prev) => prev.filter((item) => item.id !== id));
+    if (activeId === id) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setRunning(false);
+      const next = projects.find((item) => item.id !== id);
+      if (next) setActiveId(next.id);
+      else handleCreate();
+    }
+    toast("success", "项目已删除");
+  };
+
   const railProps = {
     projects: allProjects,
     activeId,
     onSelect: handleSelect,
     onCreate: handleCreate,
     onLogout: handleLogout,
+    onRename: handleRenameProject,
+    onDelete: handleDeleteProject,
     onCollapse: () => setRailOpen(false),
   };
 

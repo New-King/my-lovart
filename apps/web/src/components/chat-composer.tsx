@@ -227,15 +227,56 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
     event.target.value = "";
   }
 
+  /** 从画布复制图片时，剪贴板里常常只有 data:image 的 HTML/文本，没有 File */
+  async function filesFromDataUrls(source: string): Promise<File[]> {
+    const urls = new Set<string>();
+    const value = source.trim();
+
+    if (value.startsWith("data:image/")) urls.add(value);
+    for (const match of value.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) {
+      if (match[1]?.startsWith("data:image/")) urls.add(match[1]);
+    }
+
+    const files: File[] = [];
+    for (const url of [...urls].slice(0, 4)) {
+      try {
+        const blob = await (await fetch(url)).blob();
+        if (!blob.type.startsWith("image/")) continue;
+        files.push(
+          new File([blob], `pasted-image-${files.length + 1}.${blob.type.split("/")[1] ?? "png"}`, {
+            type: blob.type,
+          }),
+        );
+      } catch {
+        // 单张解析失败就跳过，不影响手动输入
+      }
+    }
+    return files;
+  }
+
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
 
-    if (files.length === 0) return;
-    event.preventDefault();
-    handleFiles(files);
+    if (files.length > 0) {
+      event.preventDefault();
+      handleFiles(files);
+      return;
+    }
+
+    // 画布复制出来的图片经常只有 data URL 文本/HTML
+    const text = event.clipboardData.getData("text/plain");
+    const html = event.clipboardData.getData("text/html");
+    const hasDataImage = text.trim().startsWith("data:image/") || /<img[^>]+src=["']data:image\//i.test(html);
+
+    if (hasDataImage) {
+      event.preventDefault();
+      void filesFromDataUrls(html || text).then((images) => {
+        if (images.length > 0) handleFiles(images);
+      });
+    }
   }
 
   function handleDragEnter(event: DragEvent) {

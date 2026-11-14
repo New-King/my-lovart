@@ -137,6 +137,21 @@ export const listProjects = () => request<Project[]>("/projects");
 export const createProject = (name: string) =>
   request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) });
 
+export const renameProject = (id: string, name: string) =>
+  request<Project>(`/projects/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+
+export const deleteProject = (id: string) =>
+  request<void>(`/projects/${id}`, { method: "DELETE" });
+
+export const autoNameProject = (id: string, prompt: string) =>
+  request<Project>(`/projects/${id}/auto-name`, {
+    method: "POST",
+    body: JSON.stringify({ prompt }),
+  });
+
 export const getWorkspace = (projectId: string) =>
   request<WorkspaceData>(`/workspace/${projectId}`);
 
