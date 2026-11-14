@@ -364,7 +364,13 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_error") {
         const name = event.name ?? "";
-        if (name !== "generate_image" && name !== "generate_video") continue;
+        if (
+          name !== "generate_image" &&
+          name !== "generate_video" &&
+          name !== "manipulate_canvas"
+        ) {
+          continue;
+        }
 
         const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
         activeTool = null;
