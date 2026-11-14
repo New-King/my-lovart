@@ -31,7 +31,9 @@
 - [x] 文字与产物交错渲染
 - [x] 参考图视觉输入（最近 4 张 image_url）
 - [x] 输入框收敛为 + / 发送，画幅交给模型
-- [ ] 持久化线程与画布/文件
+- [x] 持久化线程与画布/文件
+- [ ] 产物账本（标题/prompt/模型/血缘/版本）
+- [ ] 分镜与镜头状态
 - [ ] 生成作业队列
 - [ ] 画布工具深度（add_text/add_shape/add_line/update_text/update_style）
 - [ ] golden 场景自动化
@@ -53,17 +55,36 @@
 
 目标：刷新、重启、跨轮都不丢，解决“上次还好好的”。
 
+### 1a / 1b · 已完成
+
 - [x] migration 0002：messages 补 attachments / parts / steps / status / failure / options / updated_at（已执行）
 - [x] workspace repository：消息与画布读写切 Supabase，保留内存缓存
 - [x] canvas elements 落 `canvases`，读写在服务端完成
 - [x] Excalidraw files 落 Supabase Storage（bucket `project-files`），客户端按需取
 - [x] 附件 asset_id 改稳定 id（`asset-${attachment.id}`）
-- [ ] 接 LangGraph PostgresSaver checkpointer + thread_id
-- [ ] 历史裁剪与视觉附件预算（压缩、最多张数）
 - [x] workspace 路由校验 project 归属
 - [x] 持久化验收脚本 `pnpm --filter @my-lovart/server verify:persistence`
 
-验收：重启服务后，同一 project 的消息、画布、图片、参考图全部还在；同一个 thread 能继续上下文。
+### 1c · 产物账本（下一步）
+
+目标：生成图片/视频的标题、完整 prompt、模型、来源、版本，下一轮还能准确找到。
+
+- [ ] migration 0003：`project_assets`
+- [ ] `ImageBlock`/`VideoBlock` 增加 `title`，工具结果写入完整 prompt 与 `sourceAssetIds`
+- [ ] artifact 落库为不可变资产；画布元素写 `customData.assetId`
+- [ ] 每轮注入 `<project_assets>` 摘要
+- [ ] `list_assets` / `get_asset` 工具
+- [ ] `verify:assets` 验收脚本，跑 G16/G22
+
+验收：删掉画布图片后，仍能用「刚才那张咖啡海报」找到 asset_id 和 prompt 并改图。
+
+### 1d · 执行记忆
+
+- [ ] 接 LangGraph PostgresSaver checkpointer + thread_id
+- [ ] 历史裁剪与视觉附件预算（压缩、最多张数），避免 checkpointer 与手工 history 重复
+- [ ] 工具消息裁剪策略
+
+验收：重启后同一 thread 能继续上下文；工具调用细节可恢复；上下文不随轮次无限膨胀。
 
 ## Phase 2 · 生成作业化
 
@@ -76,6 +97,19 @@
 - [ ] 视频播放/编码问题一起解决
 
 验收：视频生成期间可以取消；刷新后作业继续；超时后结果晚报也能自动上画布。
+
+## Phase 2.5 · 分镜与镜头
+
+目标：分镜不是一长串自然语言，而是可查询、可重置、可回退的结构化状态。
+
+- [ ] migration 0004：`storyboards` / `storyboard_shots` / `storyboard_revisions`
+- [ ] `get_storyboard` / `create_storyboard` / `update_shot` / `reorder_shots`
+- [ ] `reset_shot` / `reset_storyboard` / `restore_storyboard` / `set_shot_asset`
+- [ ] 每轮注入 `<project_state>` 分镜摘要
+- [ ] 生成工具支持 `shotId` / `sourceAssetIds`，结果自动挂到镜头 active
+- [ ] 跑 G17–G21、G23
+
+验收：能改第 3 个镜头、重置后恢复、在两个分镜之间精确切换，不靠模型记忆猜。
 
 ## Phase 3 · 工具深度
 
@@ -112,5 +146,5 @@
 
 ## 下一步（只做这一件）
 
-先完成 Phase 0 的两份规格文档，然后按 Phase 1 落 migration 和 workspace repository。  
-在 Phase 0 未完成前，不接受任何新的 UI / 提示词临时改动。
+Phase 1c：migration 0003 建 `project_assets`，把 artifact 的 title/prompt/model/血缘落库，并每轮注入 `<project_assets>` + `list_assets/get_asset`。  
+在资产账本跑通前，不动分镜工具，也不把分镜数据塞进自然语言历史。
