@@ -45,7 +45,7 @@
 - [x] 写《对话行为契约》`docs/specs/conversation-contract.md`
 - [x] 写 15 条 golden 场景 `docs/specs/golden-scenarios.md`
 - [ ] 建一个最小可执行的场景检查脚本（先支持真实模型手测记录，不追求全自动）
-- [ ] 用当前实现跑一遍 golden，记录失败项
+- [x] 用当前实现跑一遍 golden，记录失败项（`docs/specs/golden-results.md`）
 
 验收：每条 golden 都有明确 expected / forbidden 行为，后续改动必须引用场景编号。
 
