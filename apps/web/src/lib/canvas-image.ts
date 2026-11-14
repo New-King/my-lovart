@@ -33,11 +33,13 @@ type ImageDataInput = {
   batchId?: string;
 };
 
-/** 单张图片在画布上的最大尺寸，避免按原图像素铺满画布 */
-const IMAGE_MAX_WIDTH = 240;
-const IMAGE_MAX_HEIGHT = 320;
+/** 图片在屏幕上大约占多大，按当前缩放换算成场景尺寸 */
+const IMAGE_SCREEN_WIDTH = 190;
+const IMAGE_SCREEN_HEIGHT = 250;
+/** 间距和边距都按屏幕像素算，缩放变化时视觉保持一致 */
 const ROW_GAP = 20;
 const ROW_GAP_Y = 32;
+const EDGE_PADDING = 56;
 
 type RowSlot = { cursorX: number; y: number };
 type SceneElementLike = {
@@ -66,12 +68,22 @@ function rowsFor(api: ExcalidrawImperativeAPI) {
   return rows;
 }
 
-function fitSize(width: number, height: number) {
-  const scale = Math.min(1, IMAGE_MAX_WIDTH / width, IMAGE_MAX_HEIGHT / height);
+function fitSize(width: number, height: number, zoom: number) {
+  const safeZoom = zoom > 0.05 ? zoom : 1;
+  const scale = Math.min(
+    1,
+    (IMAGE_SCREEN_WIDTH / safeZoom) / width,
+    (IMAGE_SCREEN_HEIGHT / safeZoom) / height,
+  );
   return {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
   };
+}
+
+function currentZoom(api: ExcalidrawImperativeAPI) {
+  const zoom = api.getAppState().zoom?.value;
+  return zoom && zoom > 0.05 ? zoom : 1;
 }
 
 function liveElements(api: ExcalidrawImperativeAPI) {
@@ -83,8 +95,8 @@ function viewportTopLeft(api: ExcalidrawImperativeAPI) {
   const appState = api.getAppState();
   return viewportCoordsToSceneCoords(
     {
-      clientX: appState.offsetLeft + 56,
-      clientY: appState.offsetTop + 56,
+      clientX: appState.offsetLeft + EDGE_PADDING,
+      clientY: appState.offsetTop + EDGE_PADDING,
     },
     appState,
   );
@@ -147,6 +159,9 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
   if (loose.length > 0) groups.push(loose);
 
   const origin = viewportTopLeft(api);
+  const zoom = currentZoom(api);
+  const gapX = ROW_GAP / zoom;
+  const gapY = ROW_GAP_Y / zoom;
   const placements = new Map<string, { x: number; y: number; width: number; height: number }>();
 
   let rowY = origin.y;
@@ -154,12 +169,12 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
     let rowX = origin.x;
     let rowHeight = 0;
     for (const image of group) {
-      const size = fitSize(image.width, image.height);
+      const size = fitSize(image.width, image.height, zoom);
       placements.set(image.id, { x: rowX, y: rowY, ...size });
-      rowX += size.width + ROW_GAP;
+      rowX += size.width + gapX;
       rowHeight = Math.max(rowHeight, size.height);
     }
-    rowY += rowHeight + ROW_GAP_Y;
+    rowY += rowHeight + gapY;
   }
 
   const nextElements = scene.map((element) => {
@@ -219,7 +234,10 @@ async function insertImageData(
       ? { width: input.width, height: input.height }
       : await loadImageSize(input.dataURL);
 
-  const { width, height } = fitSize(natural.width, natural.height);
+  const zoom = currentZoom(api);
+  const { width, height } = fitSize(natural.width, natural.height, zoom);
+  const gapX = ROW_GAP / zoom;
+  const gapY = ROW_GAP_Y / zoom;
 
   let x: number;
   let y: number;
@@ -252,7 +270,7 @@ async function insertImageData(
         // 已有内容 → 新批次另起一行，放在内容下方
         const [left, , , bottom] = getCommonBounds(scene);
         x = Number.isFinite(left) ? left : 0;
-        y = (Number.isFinite(bottom) ? bottom : 0) + ROW_GAP_Y;
+        y = (Number.isFinite(bottom) ? bottom : 0) + gapY;
       }
 
       if (input.batchId) {
@@ -261,7 +279,7 @@ async function insertImageData(
       }
     }
 
-    if (row) row.cursorX = x + width + ROW_GAP;
+    if (row) row.cursorX = x + width + gapX;
   }
 
   const fileId = crypto.randomUUID() as BinaryFileData["id"];
