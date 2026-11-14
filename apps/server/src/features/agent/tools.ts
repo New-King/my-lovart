@@ -91,6 +91,14 @@ const canvasActionSchema = z.object({
   actions: z.array(canvasCommandSchema).min(1).max(8),
 });
 
+const choicesSchema = z.object({
+  options: z
+    .array(z.string().min(1).max(40))
+    .min(1)
+    .max(3)
+    .describe("1-3 个互斥的候选答案，必须是用户对上一个问题的回答，不是下一步动作或寒暄"),
+});
+
 type ToolContext = {
   bus: AgentEventBus;
   attachmentMap: Record<string, string>;
@@ -207,6 +215,15 @@ export function createAgentTools(context: ToolContext) {
         description:
           "调整画布上已有的元素：移动、缩放、删除、对齐、均匀分布、调整前后层、改透明度，或整理全部图片。先用 inspect_canvas 或 <canvas_state> 拿到元素 id / 别名，不要编造。一次可以提交 1-8 个动作，按数组顺序执行；返回的命令由前端真正应用。",
         schema: canvasActionSchema,
+      },
+    ),
+    tool(
+      async (input) => JSON.stringify({ summary: "等待用户选择", options: input.options }),
+      {
+        name: "offer_choices",
+        description:
+          "在正文里问完一个关键问题后调用，把 1-3 个互斥的候选答案变成按钮。只在用户已给出大部分需求、只差一个关键项，且这个问题有清晰离散答案时使用。不要用它给下一步建议、确认收到、催用户上传或替代开放性问题；用户仍可直接输入其他答案。",
+        schema: choicesSchema,
       },
     ),
     tool(

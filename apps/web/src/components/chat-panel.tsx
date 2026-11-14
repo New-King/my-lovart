@@ -427,6 +427,9 @@ export function ChatPanel({
                               {option}
                             </button>
                           ))}
+                          <p className="basis-full pt-0.5 text-[10px] text-faint">
+                            也可以直接输入其他答案。
+                          </p>
                         </div>
                       )}
 

@@ -16,30 +16,35 @@ import { AgentEventBus } from "./bus.js";
 import { buildAttachmentContext, buildCanvasContext } from "./context.js";
 import { createAgentTools } from "./tools.js";
 
-const OPTIONS_OPEN = "[OPTIONS]";
-const OPTIONS_CLOSE = "[/OPTIONS]";
-
 const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，工作在一个无限画布工具里。
 
 行为要求：
 - 所有内部思考、计划和回复都必须用中文。
 - 用中文，简洁、具体，不要客套话和总结段落。
 
-先对齐，再生成：
-- 只有需求足够具体时才调用生成工具。图片至少需要：主体、用途或比例、风格/参考图；视频至少需要：主体、时长或平台（横/竖）、画面基调或脚本方向。
-- 信息不够时，先用 1-2 句给出你的默认方案，再问最多 3 个关键问题，然后结束这一轮，不要调用任何工具，不要先做首帧图。
-- 用户说「先出一版」「直接做」「不用问」或已经给全信息时，直接开工，不要再确认。
-- 不要用工具来提问；问题直接写在回复里。用户回答后直接执行，不要重复确认。
+事实来源：
+- <canvas_state> 和 <input_images> 是唯一事实来源。画布为空就明确说画布是空的，不要根据历史对话假设画布上还有图，也不要编造用户上传了素材。
+- 不确定画布上有什么时，先调用 \`inspect_canvas\`，不要猜。
 
-追问与快捷选项：
-- 一次只问一个最关键的问题。这个问题有 2-4 个清晰、互斥的选项时，在回复的最后一行追加：
-  [OPTIONS]选项一|选项二|选项三[/OPTIONS]
-- 按钮轮的正文要短：1 句承接 + 1 句问题，不要再展开解释。选项是用户点击后直接发回给你的原话，要写成用户口吻的完整选择（例如「16:9 横版」「3:4 竖版海报」），不要写「A」「是」「否」这类脱离上下文的词。
-- 开放性问题（例如「想突出什么卖点」）不要硬配按钮，用纯文字问。
-- OPTIONS 必须是最后一行，只能出现一次；不要在正文里解释这个协议，也不要把选项写进正文。
-- 缺的只是偏好、而你有合理默认时，不要为了问而问；可以直接做，也可以把「按你的默认方案直接做」作为最后一个选项。
-- 用户已经回答过的信息不要再问；信息足够就直接调用生成工具。
-- 生成完成后，如果要给下一步建议，可以用同样的 OPTIONS 给 2-3 个可执行动作（例如「再来一版更亮的」「改成 16:9 横版」「换成极简风」）。
+先判断信息够不够：
+- 图片至少需要：主体、用途或比例、风格/参考图。
+- 视频至少需要：主体、用途/平台（横/竖）、时长、画面基调或脚本方向。
+- 用户说「先出一版」「直接做」「不用问」或已经给全信息时，直接开工，不要再确认。
+
+信息很少时（缺两个或以上关键项，或只有一句模糊目标）：
+- 不要出按钮，也不要用生成工具。用紧凑的 Markdown 清单问 2-3 个最关键的问题，问完就停。
+- 每个问题写清楚这个答案会影响什么（平台、画幅、时长、节奏、风格），让用户可以按序号一次回答。
+- 画布为空时先说明这一点，不要引用不存在的图片或上传进度。
+
+只差一个关键项时（用户已经给出大部分信息）：
+- 用一句承接 + 一句问题把缺的那项问出来；按钮轮正文最多 2 句，不要先讲一堆分析。
+- 如果这个问题有 1-3 个清晰、互斥的候选答案，先问，再调用 \`offer_choices\` 把候选答案交给用户点选，然后停止这一轮。
+- 选项必须是这个问题的答案（例如「16:9 横版」「9:16 竖版」「1:1 方版」），不能写「已经传好了」「刷新看看」「先占位」这类寒暄、确认或下一步动作。
+- 开放性问题（卖点、故事、文案）不要出按钮；素材缺失（logo、产品图）只请用户上传，不要出按钮。
+- 用户回答后直接推进，不要重复确认。
+
+生成之后：
+- 不要用 \`offer_choices\` 给下一步建议；最多用一句话说明可以怎么改，把决定权交给用户。
 
 工作方式：
 - 先判断交付物和用途，再决定构图、风格和比例；不要一上来就堆砌形容词。
@@ -144,12 +149,6 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
   let activeTool: { toolCallId: string } | null = null;
 
-  // 模型用 [OPTIONS]a|b|c[/OPTIONS] 给出快捷选项；这段协议不能出现在正文里，
-  // 需要跨 chunk 缓冲，等标记完整后一次性转成 message.options。
-  let pendingText = "";
-  let afterOptions = "";
-  let optionsSent = false;
-
   try {
     const stream = agent.streamEvents(
       { messages },
@@ -183,49 +182,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
         // 推理模型的原始 chain-of-thought 不直接展示给用户；
         // 用户能看到的是模型自己写给用户的计划与结果说明。
         const text = readChunkText(chunk);
-        if (!text) continue;
-
-        pendingText += text;
-
-        if (optionsSent) {
-          afterOptions += pendingText;
-          pendingText = "";
-          continue;
-        }
-
-        const open = pendingText.indexOf(OPTIONS_OPEN);
-        if (open === -1) {
-          // 末尾可能是半个 [OPTIONS] 标记，先扣住不发
-          const hold = partialMarkerHold(pendingText);
-          const visible =
-            hold > 0 ? pendingText.slice(0, pendingText.length - hold) : pendingText;
-          pendingText = hold > 0 ? pendingText.slice(-hold) : "";
-          if (visible) yield emit({ type: "message.delta", delta: visible });
-          continue;
-        }
-
-        const before = pendingText.slice(0, open).replace(/\s+$/, "");
-        if (before) yield emit({ type: "message.delta", delta: before });
-
-        const close = pendingText.indexOf(OPTIONS_CLOSE, open + OPTIONS_OPEN.length);
-        if (close === -1) {
-          // 选项还没流完，保留标记等待后续 chunk
-          pendingText = pendingText.slice(open);
-          continue;
-        }
-
-        const raw = pendingText.slice(open + OPTIONS_OPEN.length, close);
-        afterOptions = pendingText.slice(close + OPTIONS_CLOSE.length);
-        pendingText = "";
-
-        const parsedOptions = parseOptions(raw);
-        if (parsedOptions.length > 0) {
-          optionsSent = true;
-          yield emit({ type: "message.options", options: parsedOptions });
-        } else if (afterOptions) {
-          pendingText = afterOptions;
-          afterOptions = "";
-        }
+        if (text) yield emit({ type: "message.delta", delta: text });
         continue;
       }
 
@@ -279,6 +236,19 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_end") {
         const name = event.name ?? "";
+
+        if (name === "offer_choices") {
+          const parsed = parseToolOutput(event.data?.output);
+          const options = Array.isArray(parsed?.options)
+            ? parsed.options
+                .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+                .slice(0, 3)
+            : [];
+          if (options.length > 0) {
+            yield emit({ type: "message.options", options });
+          }
+          continue;
+        }
 
         if (name === "manipulate_canvas") {
           const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
@@ -391,10 +361,6 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       return;
     }
 
-    // 流结束时把扣住的正文放出来；未闭合的协议标记直接丢弃
-    const tail = optionsSent ? afterOptions : flushPending(pendingText);
-    if (tail.trim()) yield emit({ type: "message.delta", delta: tail });
-
     yield emit({ type: "run.completed" });
   } catch (error) {
     if (input.signal.aborted) {
@@ -488,7 +454,7 @@ function readChunkText(chunk: unknown): string {
 }
 
 function parseToolOutput(output: unknown):
-  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown }
+  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown }
   | null {
   if (typeof output === "string") return safeJson(output);
   if (typeof output !== "object" || output === null) return null;
@@ -528,33 +494,4 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message.slice(0, 300);
   if (typeof error === "string") return error.slice(0, 300);
   return "Agent 运行失败，请重试";
-}
-
-function parseOptions(raw: string): string[] {
-  const result: string[] = [];
-  for (const part of raw.split("|")) {
-    const value = part.trim().replace(/^["'「『]+|["'」』]+$/g, "");
-    if (!value || value.length > 40) continue;
-    if (result.includes(value)) continue;
-    result.push(value);
-    if (result.length === 6) break;
-  }
-  return result;
-}
-
-/** 末尾若是半个 [OPTIONS] 标记，返回要扣住的字符数 */
-function partialMarkerHold(text: string): number {
-  const max = Math.min(text.length, OPTIONS_OPEN.length - 1);
-  for (let size = max; size > 0; size -= 1) {
-    if (text.endsWith(OPTIONS_OPEN.slice(0, size))) return size;
-  }
-  return 0;
-}
-
-/** 流结束时释放被扣住的正文；未闭合的协议标记直接丢弃 */
-function flushPending(text: string): string {
-  const open = text.indexOf(OPTIONS_OPEN);
-  if (open >= 0) return text.slice(0, open);
-  const hold = partialMarkerHold(text);
-  return hold > 0 ? text.slice(0, text.length - hold) : text;
 }

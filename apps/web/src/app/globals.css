@@ -81,7 +81,8 @@
 }
 
 /* Excalidraw 的操作提示会随工具和鼠标状态不断变化，压在工具栏下面很干扰 */
-.excalidraw .HintViewer {
+.excalidraw .HintViewer,
+.HintViewer {
   display: none !important;
 }
 
