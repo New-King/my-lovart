@@ -18,6 +18,9 @@ import type {
   BinaryFileData,
   ExcalidrawImperativeAPI,
 } from "@excalidraw/excalidraw/types";
+import type { CanvasCommand } from "@my-lovart/shared";
+import { applyCanvasCommands } from "@/lib/canvas-command-runner";
+import type { CanvasCommandResult } from "@/lib/canvas-commands";
 import {
   arrangeCanvasImages,
   insertImageFileIntoCanvas,
@@ -62,6 +65,8 @@ export type CanvasStageHandle = {
     /** 生成链路自动入画布时不弹 toast */
     silent?: boolean;
   }) => Promise<void>;
+  /** 执行 Agent 下发的画布动作（移动 / 对齐 / 删除…） */
+  applyCommands: (commands: CanvasCommand[]) => CanvasCommandResult;
 };
 
 function waitAtLeast(start: number, ms: number) {
@@ -255,6 +260,21 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           null,
           input.silent ?? false,
         ),
+      applyCommands(commands) {
+        const api = apiRef.current;
+        if (!api || !hydrated.current) {
+          return { applied: 0, errors: ["画布还没准备好，操作没有执行"] };
+        }
+        try {
+          return applyCanvasCommands(api, commands);
+        } catch (err) {
+          console.error("[canvas] 执行 Agent 画布操作失败", err);
+          return {
+            applied: 0,
+            errors: [err instanceof Error ? err.message : "画布操作失败"],
+          };
+        }
+      },
     }),
     [addChatImage],
   );

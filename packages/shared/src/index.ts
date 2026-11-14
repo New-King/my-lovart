@@ -10,7 +10,11 @@ export type TextBlock = {
   text: string;
 };
 
-export type ToolName = "generate_image" | "generate_video" | "search_inspiration";
+export type ToolName =
+  | "generate_image"
+  | "generate_video"
+  | "manipulate_canvas"
+  | "search_inspiration";
 export type ToolStatus = "queued" | "running" | "done" | "failed";
 
 export type ToolBlock = {
@@ -79,6 +83,19 @@ export type InspirationBlock = {
 
 export type ChatBlock = TextBlock | ToolBlock | ImageBlock | VideoBlock | InspirationBlock;
 
+/** 画布元素操作：服务端只描述意图，前端在 Excalidraw 上执行 */
+export type CanvasAlignEdge = "left" | "right" | "top" | "bottom" | "centerX" | "centerY";
+
+export type CanvasCommand =
+  | { op: "move"; ids: string[]; x?: number; y?: number; dx?: number; dy?: number }
+  | { op: "resize"; ids: string[]; width?: number; height?: number; scale?: number }
+  | { op: "delete"; ids: string[] }
+  | { op: "align"; ids: string[]; edge: CanvasAlignEdge }
+  | { op: "distribute"; ids: string[]; axis: "horizontal" | "vertical" }
+  | { op: "reorder"; ids: string[]; to: "front" | "back" }
+  | { op: "opacity"; ids: string[]; opacity: number }
+  | { op: "arrange" };
+
 export type AgentReply = {
   content: string;
   blocks: ChatBlock[];
@@ -130,6 +147,11 @@ export type Thought = {
   finishedAt?: string;
 };
 
+/** 消息里有顺序的内容：文字和产物按到达时间交错，而不是文字全在上、图片全在下。 */
+export type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "block"; block: ChatBlock };
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -149,6 +171,8 @@ export type ChatMessage = {
   thoughts?: Thought[];
   attachments?: ChatAttachment[];
   blocks?: ChatBlock[];
+  /** 有序内容；老消息没有这个字段时前端回退到 content + blocks */
+  parts?: MessagePart[];
   /** 助手这一轮给出的快捷选项，用户点一下就把选项原文发回去 */
   options?: string[];
 };
@@ -211,6 +235,7 @@ export type RunEvent =
     })
   | (RunEventBase & { type: "tool.failed"; toolCallId: string; error: RunError })
   | (RunEventBase & { type: "artifact.ready"; artifact: Artifact })
+  | (RunEventBase & { type: "canvas.command"; commands: CanvasCommand[] })
   | (RunEventBase & { type: "canvas.sync"; artifactId: string })
   | (RunEventBase & { type: "run.completed" })
   | (RunEventBase & { type: "run.canceled" })

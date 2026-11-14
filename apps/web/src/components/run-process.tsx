@@ -8,6 +8,7 @@ import {
   ImagePlus,
   Lightbulb,
   Loader2,
+  Move,
   Search,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -16,6 +17,7 @@ import { useEffect, useState } from "react";
 const TOOL_ICONS = {
   generate_image: ImagePlus,
   generate_video: Clapperboard,
+  manipulate_canvas: Move,
   search_inspiration: Search,
 } as const;
 

@@ -291,6 +291,8 @@ function applyEvent(projectId: string, messageId: string, event: RunEvent): void
     case "artifact.ready":
       appendBlock(projectId, messageId, event.artifact, event.at);
       return;
+    case "canvas.command":
+      return;
     case "canvas.sync":
       return;
     case "run.completed":

@@ -1,5 +1,6 @@
 import type {
   AspectRatio,
+  CanvasCommand,
   ChatAttachment,
   ImageBlock,
   RunError,
@@ -52,6 +53,8 @@ const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，工作在一个无�
 - 一次工具调用只产出一张图或一条视频；用户要多版本时分多次调用，并在 title 上区分。
 - 有参考图时，用 <input_images> 或 <canvas_images> 里的 asset_id 传给工具的 inputImages；不要凭空编造图片内容。
 - 需要了解画布现状时调用 \`inspect_canvas\`，不要猜测坐标。
+- 画布上的移动、缩放、删除、对齐、均匀分布、前后层、透明度、整体整理，用 \`manipulate_canvas\`；元素 id 或 canvas-N 别名必须来自 <canvas_state>，不能编造。用户说「并排」「对齐」「整理一下」「删掉这张」「放大一点」时直接操作，不要重新生成图片。
+- 改完画布用一句话说明动了什么；不要假装已经移动，工具返回成功才代表前端会执行。
 - 不要编造工具没有返回的信息；工具报错就如实说明并给替代方案。`;
 
 export type AgentRunInput = {
@@ -106,6 +109,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     bus,
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
     canvasSummary: canvasContext.summary,
+    canvasElements: canvasContext.elements,
     baseUrl: input.baseUrl,
     signal: input.signal,
   });
@@ -227,6 +231,27 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_start") {
         const name = event.name ?? "";
+
+        if (name === "manipulate_canvas") {
+          const toolCallId = event.run_id ?? randomUUID();
+          const args = asRecord(event.data?.input);
+          activeTool = { toolCallId };
+          yield emit({
+            type: "tool.started",
+            tool: {
+              id: toolCallId,
+              type: "tool",
+              tool: "manipulate_canvas",
+              status: "running",
+              title: "调整画布",
+              detail:
+                typeof args?.summary === "string" ? args.summary.slice(0, 100) : undefined,
+              startedAt: new Date().toISOString(),
+            },
+          });
+          continue;
+        }
+
         if (name !== "generate_image" && name !== "generate_video") continue;
 
         const toolCallId = event.run_id ?? randomUUID();
@@ -254,6 +279,53 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
       if (event.event === "on_tool_end") {
         const name = event.name ?? "";
+
+        if (name === "manipulate_canvas") {
+          const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
+          activeTool = null;
+          const parsed = parseToolOutput(event.data?.output);
+
+          if (parsed?.error) {
+            yield emit({
+              type: "tool.failed",
+              toolCallId,
+              error: {
+                code: typeof parsed.code === "string" ? parsed.code : "invalid_canvas_command",
+                message: parsed.error,
+                retriable: true,
+              },
+            });
+            continue;
+          }
+
+          const commands = Array.isArray(parsed?.commands)
+            ? (parsed.commands as CanvasCommand[])
+            : [];
+          if (commands.length === 0) {
+            yield emit({
+              type: "tool.failed",
+              toolCallId,
+              error: {
+                code: "invalid_canvas_command",
+                message: "没有可执行的画布动作",
+                retriable: true,
+              },
+            });
+            continue;
+          }
+
+          yield emit({
+            type: "tool.completed",
+            toolCallId,
+            outputSummary:
+              typeof parsed?.summary === "string"
+                ? parsed.summary
+                : `${commands.length} 个画布操作`,
+          });
+          yield emit({ type: "canvas.command", commands });
+          continue;
+        }
+
         if (name !== "generate_image" && name !== "generate_video") continue;
 
         const toolCallId = event.run_id ?? activeTool?.toolCallId;
@@ -410,7 +482,7 @@ function readChunkText(chunk: unknown): string {
 }
 
 function parseToolOutput(output: unknown):
-  | { summary?: string; artifact?: unknown; error?: string; code?: string }
+  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown }
   | null {
   if (typeof output === "string") return safeJson(output);
   if (typeof output !== "object" || output === null) return null;
