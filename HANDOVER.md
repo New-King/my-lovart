@@ -50,7 +50,7 @@ supabase        migrations
 
 - **登录**：Supabase Auth 邮箱密码。前端 `signInWithPassword`，会话存浏览器；服务端每个接口用 service key 调 `auth.getUser(token)`，没 token 返回 401。**不开放注册**
 - **项目**：`projects` 表，RLS 按 `user_id` 隔离；服务端走 service_role、查询显式带 `user_id`。草稿逻辑在前端（新建先不落库，产生内容才建）
-- **画布**：Excalidraw 可用，改动 600ms 防抖后 `PUT /workspace/:id/canvas`
+- **画布**：Excalidraw 可用，改动 600ms 防抖后 `POST /workspace/:id/canvas`
 - **对话**：`POST /workspace/:id/messages` 调 DeepSeek，回复用 Markdown 渲染
 - **首页**：中性冷色调，流程轨道动画（rare-ui rail-toc + 本地 `autoLoop` 参数）
 

@@ -60,11 +60,14 @@ async function authToken(): Promise<string | null> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await authToken();
+  // 没有 body 的请求不能带 content-type: application/json，
+  // Fastify 会以 FST_ERR_CTP_EMPTY_JSON_BODY 拒掉整条请求
+  const hasBody = init?.body !== undefined && init.body !== null;
 
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(hasBody ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
@@ -138,13 +141,13 @@ export const createProject = (name: string) =>
   request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) });
 
 export const renameProject = (id: string, name: string) =>
-  request<Project>(`/projects/${id}`, {
-    method: "PATCH",
+  request<Project>(`/projects/${id}/rename`, {
+    method: "POST",
     body: JSON.stringify({ name }),
   });
 
 export const deleteProject = (id: string) =>
-  request<void>(`/projects/${id}`, { method: "DELETE" });
+  request<void>(`/projects/${id}/delete`, { method: "POST" });
 
 export const autoNameProject = (id: string, prompt: string) =>
   request<Project>(`/projects/${id}/auto-name`, {
@@ -161,7 +164,7 @@ export const saveCanvas = (
   files: Record<string, unknown>,
 ) =>
   request<void>(`/workspace/${projectId}/canvas`, {
-    method: "PUT",
+    method: "POST",
     body: JSON.stringify({ elements, files }),
   });
 

@@ -20,7 +20,7 @@ export function registerProjectRoutes(app: FastifyInstance, repo: ProjectsReposi
     }
   });
 
-  app.patch<{ Params: Params; Body: Body }>("/projects/:id", async (request, reply) => {
+  app.post<{ Params: Params; Body: Body }>("/projects/:id/rename", async (request, reply) => {
     try {
       const project = await service.rename(await requireUserId(request), request.params.id, request.body?.name);
       if (!project) return reply.code(404).send({ error: "项目不存在" });
@@ -47,7 +47,7 @@ export function registerProjectRoutes(app: FastifyInstance, repo: ProjectsReposi
     },
   );
 
-  app.delete<{ Params: Params }>("/projects/:id", async (request, reply) => {
+  app.post<{ Params: Params }>("/projects/:id/delete", async (request, reply) => {
     const ok = await service.remove(await requireUserId(request), request.params.id);
     if (!ok) return reply.code(404).send({ error: "项目不存在" });
     return reply.code(204).send();

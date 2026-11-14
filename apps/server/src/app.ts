@@ -21,6 +21,11 @@ export function buildApp() {
     if (error instanceof UnauthorizedError) {
       return reply.code(401).send({ error: error.message });
     }
+    // Fastify 自己抛的 4xx（例如空 body 的 JSON 请求、格式错误）如实返回，别一律包成 500
+    const status = (error as { statusCode?: unknown }).statusCode;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      return reply.code(status).send({ error: error instanceof Error ? error.message : "请求格式错误" });
+    }
     app.log.error(error);
     return reply.code(500).send({ error: "服务器错误" });
   });
