@@ -34,10 +34,10 @@ type ImageDataInput = {
 };
 
 /** 单张图片在画布上的最大尺寸，避免按原图像素铺满画布 */
-const IMAGE_MAX_WIDTH = 380;
-const IMAGE_MAX_HEIGHT = 480;
-const ROW_GAP = 24;
-const ROW_GAP_Y = 36;
+const IMAGE_MAX_WIDTH = 240;
+const IMAGE_MAX_HEIGHT = 320;
+const ROW_GAP = 20;
+const ROW_GAP_Y = 32;
 
 type RowSlot = { cursorX: number; y: number };
 type SceneElementLike = {
@@ -78,12 +78,13 @@ function liveElements(api: ExcalidrawImperativeAPI) {
   return api.getSceneElements().filter((element) => !element.isDeleted);
 }
 
-function viewportCenter(api: ExcalidrawImperativeAPI) {
+/** 空白画布从视口左上角开始放，避免内容一上来就占满一屏 */
+function viewportTopLeft(api: ExcalidrawImperativeAPI) {
   const appState = api.getAppState();
   return viewportCoordsToSceneCoords(
     {
-      clientX: appState.offsetLeft + appState.width / 2,
-      clientY: appState.offsetTop + appState.height / 2,
+      clientX: appState.offsetLeft + 56,
+      clientY: appState.offsetTop + 56,
     },
     appState,
   );
@@ -145,12 +146,12 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
   }
   if (loose.length > 0) groups.push(loose);
 
-  const [startX, startY] = getCommonBounds(liveElements(api));
+  const origin = viewportTopLeft(api);
   const placements = new Map<string, { x: number; y: number; width: number; height: number }>();
 
-  let rowY = Number.isFinite(startY) ? startY : 0;
+  let rowY = origin.y;
   for (const group of groups) {
-    let rowX = Number.isFinite(startX) ? startX : 0;
+    let rowX = origin.x;
     let rowHeight = 0;
     for (const image of group) {
       const size = fitSize(image.width, image.height);
@@ -181,7 +182,6 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
     elements: nextElements as never[],
     captureUpdate: "IMMEDIATELY",
   });
-  api.scrollToContent(nextElements as never[], { fitToContent: true });
   return images.length;
 }
 
@@ -244,9 +244,10 @@ async function insertImageData(
     } else {
       const scene = liveElements(api);
       if (scene.length === 0) {
-        const center = viewportCenter(api);
-        x = center.x - width / 2;
-        y = center.y - height / 2;
+        // 空白画布 → 左上角起排，不居中也不铺满
+        const origin = viewportTopLeft(api);
+        x = origin.x;
+        y = origin.y;
       } else {
         // 已有内容 → 新批次另起一行，放在内容下方
         const [left, , , bottom] = getCommonBounds(scene);

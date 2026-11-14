@@ -326,6 +326,7 @@ export function Workspace() {
         width: block.width,
         height: block.height,
         ...(block.batchId ? { batchId: block.batchId } : {}),
+        silent: true,
       });
     }
   }, []);

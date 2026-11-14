@@ -59,6 +59,8 @@ export type CanvasStageHandle = {
     width?: number;
     height?: number;
     batchId?: string;
+    /** 生成链路自动入画布时不弹 toast */
+    silent?: boolean;
   }) => Promise<void>;
 };
 
@@ -162,7 +164,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   );
 
   const addChatImage = useCallback(
-    async (payload: ChatImageDragPayload, point: CanvasImagePlacement | null) => {
+    async (
+      payload: ChatImageDragPayload,
+      point: CanvasImagePlacement | null,
+      silent = false,
+    ) => {
       const api = apiRef.current;
       if (!api || !hydrated.current) {
         showToast("error", "画布还在加载，请稍后再试");
@@ -181,11 +187,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           placement: point ?? undefined,
           ...(payload.batchId ? { batchId: payload.batchId } : {}),
         });
-        await waitAtLeast(started, 350);
-        showToast("success", "图片已添加到画布");
+        await waitAtLeast(started, silent ? 0 : 350);
+        if (!silent) showToast("success", "图片已添加到画布");
       } catch (err) {
         console.error("[canvas] 聊天图片拖入失败", err);
-        showToast("error", "图片添加失败，请重试");
+        if (!silent) showToast("error", "图片添加失败，请重试");
       } finally {
         setBusy((count) => count - 1);
       }
@@ -207,6 +213,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             ...(input.batchId ? { batchId: input.batchId } : {}),
           },
           null,
+          input.silent ?? false,
         ),
     }),
     [addChatImage],
