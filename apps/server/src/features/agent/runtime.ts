@@ -35,6 +35,9 @@ export type AgentRunInput = {
   canvasFiles: Record<string, unknown>;
   baseUrl: string;
   signal: AbortSignal;
+  /** LangGraph checkpointer；有它时不再手工拼 history，避免重复 */
+  checkpointer?: NonNullable<Parameters<typeof createDeepAgent>[0]>["checkpointer"];
+  threadId?: string;
   trace?: Trace;
 };
 
@@ -106,6 +109,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     tools,
     systemPrompt: SYSTEM_PROMPT,
     name: "mylovart",
+    ...(input.checkpointer ? { checkpointer: input.checkpointer } : {}),
   });
 
   const userText = buildUserText(
@@ -116,15 +120,49 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     projectAssetsContext.xml,
     Object.keys(attachmentContext.map).length > 0,
   );
-  const messages = [
-    ...input.history.map((message) =>
-      message.role === "assistant" ? new AIMessage(message.content) : new HumanMessage(message.content),
-    ),
-    buildHumanMessage(userText, attachmentContext.map),
-  ];
+  const checkpointEnabled = Boolean(input.checkpointer && input.threadId);
+  let checkpointHasState = false;
+  if (checkpointEnabled && input.checkpointer && input.threadId) {
+    try {
+      const saver = input.checkpointer as {
+        getTuple?: (config: {
+          configurable: { thread_id: string };
+        }) => Promise<unknown>;
+      };
+      const tuple = await saver.getTuple?.({
+        configurable: { thread_id: input.threadId },
+      });
+      checkpointHasState = Boolean(tuple);
+    } catch (err) {
+      input.trace?.event("checkpoint.read_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      checkpointHasState = false;
+    }
+  }
+
+  const humanMessage = buildHumanMessage(
+    userText,
+    selectVisionImages(attachmentContext.map, input.trace),
+  );
+  // 第一次启用 checkpointer 时，把已有的产品历史种进去；之后只发当前消息。
+  const messages =
+    checkpointEnabled && checkpointHasState
+      ? [humanMessage]
+      : [
+          ...input.history.map((message) =>
+            message.role === "assistant"
+              ? new AIMessage(message.content)
+              : new HumanMessage(message.content),
+          ),
+          humanMessage,
+        ];
 
   input.trace?.event("model.request", {
     model: env.agentModel,
+    checkpointEnabled,
+    checkpointHasState,
+    threadId: input.threadId,
     historyCount: input.history.length,
     messageCount: messages.length,
     visionCount: Object.keys(attachmentContext.map).length,
@@ -138,7 +176,13 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   try {
     const stream = agent.streamEvents(
       { messages },
-      { version: "v2", signal: input.signal },
+      {
+        version: "v2",
+        signal: input.signal,
+        ...(checkpointEnabled && input.threadId
+          ? { configurable: { thread_id: input.threadId } }
+          : {}),
+      },
     ) as AsyncIterable<RawStreamEvent>;
 
     for await (const item of mergeWithBus(stream, bus)) {
@@ -446,18 +490,52 @@ function buildUserText(
 /**
  * 参考图不仅写进 XML，还作为视觉内容随消息一起发给模型。
  * 否则模型只看得到文件名，回答「这是谁」「这张图什么风格」时就只能瞎猜。
+ * 单张/总量超预算的图不塞给 provider（前端会先缩图，这里是兜底）。
  */
-function buildHumanMessage(text: string, attachmentMap: Record<string, string>): HumanMessage {
-  const images = Object.keys(attachmentMap)
+const MAX_VISION_IMAGE_CHARS = 3_500_000; // 约 2.6MB 二进制
+const MAX_VISION_TOTAL_CHARS = 9_000_000;
+
+function selectVisionImages(
+  attachmentMap: Record<string, string>,
+  trace?: Trace,
+): string[] {
+  const candidates = Object.keys(attachmentMap)
     .sort((a, b) => {
       const left = Number(a.split("-")[1]);
       const right = Number(b.split("-")[1]);
       return (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
     })
-    .slice(0, 4)
     .map((key) => attachmentMap[key])
     .filter((url): url is string => Boolean(url));
 
+  const selected: string[] = [];
+  let used = 0;
+  let skipped = 0;
+
+  for (const url of candidates) {
+    if (selected.length >= 4) break;
+    const size = url.length;
+    if (url.startsWith("data:") && (size > MAX_VISION_IMAGE_CHARS || used + size > MAX_VISION_TOTAL_CHARS)) {
+      skipped += 1;
+      continue;
+    }
+    selected.push(url);
+    used += size;
+  }
+
+  if (skipped > 0) {
+    trace?.event("vision.budget", {
+      candidates: candidates.length,
+      selected: selected.length,
+      skipped,
+      chars: used,
+    });
+  }
+
+  return selected;
+}
+
+function buildHumanMessage(text: string, images: string[]): HumanMessage {
   if (images.length === 0) return new HumanMessage(text);
 
   return new HumanMessage({

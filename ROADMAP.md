@@ -79,13 +79,15 @@
 验收：删掉画布图片后，仍能用「刚才那张咖啡海报」找到 asset_id 和 prompt 并改图。  
 验证记录：`docs/notes/M15.md`；真实 HTTP 问标题返回正确，mock 生成 3 个 artifact 全部入账。
 
-### 1d · 执行记忆
+### 1d · 执行记忆（已完成）
 
-- [ ] 接 LangGraph PostgresSaver checkpointer + thread_id
-- [ ] 历史裁剪与视觉附件预算（压缩、最多张数），避免 checkpointer 与手工 history 重复
-- [ ] 工具消息裁剪策略
+- [x] 接 LangGraph PostgresSaver checkpointer + thread_id（migration 0004 已执行）
+- [x] 历史裁剪与视觉附件预算（压缩、最多张数），避免 checkpointer 与手工 history 重复
+- [x] 工具消息裁剪策略（deepagents 内置 SummarizationMiddleware）
+- [x] `/health` 暴露 checkpointer 状态；未安装依赖时自动降级
 
-验收：重启后同一 thread 能继续上下文；工具调用细节可恢复；上下文不随轮次无限膨胀。
+验收：重启后同一 thread 能继续上下文；工具调用细节可恢复；上下文不随轮次无限膨胀。  
+验证记录：`docs/notes/M16.md`；真实模型两轮 + 杀进程重启第三轮，均正确回答 ORBIT-9。
 
 ## Phase 2 · 生成作业化
 
@@ -147,5 +149,5 @@
 
 ## 下一步（只做这一件）
 
-Phase 1d：接 LangGraph `PostgresSaver` + `thread_id`，让工具调用与结果跨轮/跨进程恢复；同时把视觉附件与历史做成预算，避免 checkpointer 和手工 history 重复。  
-1c 已能解决“图片简介/完整 prompt 下一轮看不到”，1d 解决“工具执行细节与线程恢复”。
+Phase 2a：`background_jobs` + worker + 图片/视频工具改为提交作业；超时返回 jobId，前端 fallback 轮询；服务端自动落位并写画布。  
+先把“长任务不堵 Agent、关页面也能出结果、超时能补”跑通，再做视频内联播放与分镜。

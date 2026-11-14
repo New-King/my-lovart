@@ -7,6 +7,7 @@ import type {
   RunStep,
   Thought,
 } from "@my-lovart/shared";
+import { randomUUID } from "node:crypto";
 import { getDb } from "../../db/supabase.js";
 import { env } from "../../lib/env.js";
 import { hydrateCanvasFiles, persistCanvasFiles } from "./canvas-file-store.js";
@@ -18,6 +19,8 @@ export type WorkspaceRepository = {
   load(projectId: string): Promise<WorkspaceSnapshot>;
   saveCanvas(projectId: string, elements: unknown[], files: Record<string, unknown>): Promise<void>;
   saveMessage(projectId: string, message: ChatMessage): Promise<void>;
+  /** 该 project 的 LangGraph thread_id；没有就创建并写回 sessions */
+  getThreadId(projectId: string): Promise<string>;
 };
 
 type MessageRow = {
@@ -171,6 +174,25 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
         .update({ elements, files: manifest, updated_at: new Date().toISOString() })
         .eq("id", canvas.id);
       if (error) throw error;
+    },
+
+    async getThreadId(projectId) {
+      const sessionId = await ensureSession(projectId);
+      const { data, error } = await db()
+        .from("sessions")
+        .select("thread_id")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (error) throw error;
+      if (data?.thread_id) return data.thread_id as string;
+
+      const threadId = `thread_${randomUUID()}`;
+      const { error: updateError } = await db()
+        .from("sessions")
+        .update({ thread_id: threadId })
+        .eq("id", sessionId);
+      if (updateError) throw updateError;
+      return threadId;
     },
 
     async saveMessage(projectId, message) {

@@ -47,6 +47,53 @@ import {
 } from "./workspace.repository.js";
 
 export const MESSAGE_MAX = 4000;
+const HISTORY_CHAR_BUDGET = 12_000;
+const HISTORY_MESSAGE_MAX_CHARS = 4_000;
+
+/** checkpointer 是可选依赖：没装 pg 或没配库时退化，不影响消息/画布持久化。 */
+type AgentCheckpointer = NonNullable<
+  Parameters<typeof import("../agent/runtime.js").runAgent>[0]
+>["checkpointer"];
+
+const fallbackThreads = new Map<string, string>();
+
+async function ensureThreadId(
+  projectId: string,
+  repo: WorkspaceRepository | null,
+): Promise<string> {
+  if (repo) {
+    try {
+      return await repo.getThreadId(projectId);
+    } catch (err) {
+      console.warn(
+        "[checkpointer] thread_id 读取失败，退回进程内 thread：",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  const existing = fallbackThreads.get(projectId);
+  if (existing) return existing;
+  const threadId = `thread_${randomUUID()}`;
+  fallbackThreads.set(projectId, threadId);
+  return threadId;
+}
+
+async function loadCheckpointer(): Promise<AgentCheckpointer | null> {
+  try {
+    const { getCheckpointer } = await import("../agent/persistence/checkpointer.js");
+    return ((await getCheckpointer()) as AgentCheckpointer | null) ?? null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Cannot find package")) {
+      console.warn(
+        "[checkpointer] 未启用：请先在项目根目录运行 pnpm install（新增 pg / @langchain/langgraph-checkpoint-postgres）",
+      );
+    } else {
+      console.warn("[checkpointer] 未启用（初始化失败）：", message);
+    }
+    return null;
+  }
+}
 
 export class WorkspaceInputError extends Error {}
 
@@ -188,15 +235,31 @@ export function createWorkspaceService(
       startAssistantMessage(projectId, messageId);
       await persistMessage(repo, projectId, messageId);
 
-      const history = ensureWorkspace(projectId).messages
+      const candidates = ensureWorkspace(projectId).messages
         .filter((message) => message.status !== "queued" && message.status !== "streaming")
         .filter((message) => message.id !== input.userMessageId)
         .slice(-MAX_CONTEXT_MESSAGES)
         .map((message) => ({
           role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
-          content: message.content,
+          content: message.content.slice(0, HISTORY_MESSAGE_MAX_CHARS),
         }))
         .filter((message) => message.content);
+
+      // 从最新往回装，超预算就丢最旧的；checkpointer 开启时 runtime 不会重复使用它
+      const history: typeof candidates = [];
+      let historyChars = 0;
+      for (let index = candidates.length - 1; index >= 0; index -= 1) {
+        const message = candidates[index];
+        if (!message) continue;
+        if (
+          history.length > 0 &&
+          historyChars + message.content.length > HISTORY_CHAR_BUDGET
+        ) {
+          break;
+        }
+        history.unshift(message);
+        historyChars += message.content.length;
+      }
 
       const assetRepo = await getAssetsRepository();
       let storedAssets: ProjectAsset[] = [];
@@ -212,6 +275,9 @@ export function createWorkspaceService(
         storedAssets,
         collectLegacyAssets(ensureWorkspace(projectId).messages),
       );
+
+      const checkpointer = env.generationMode === "real" ? await loadCheckpointer() : null;
+      const threadId = checkpointer ? await ensureThreadId(projectId, repo) : undefined;
 
       const trace = createTrace(runId, {
         projectId,
@@ -232,7 +298,10 @@ export function createWorkspaceService(
               : "remote-url",
         })),
         historyCount: history.length,
+        historyChars,
         projectAssetCount: projectAssets.length,
+        checkpointer: Boolean(checkpointer),
+        threadId,
         history: history.map((message) => ({
           role: message.role,
           preview: message.content.slice(0, 120),
@@ -308,6 +377,8 @@ export function createWorkspaceService(
             baseUrl,
             signal,
             trace,
+            ...(checkpointer ? { checkpointer } : {}),
+            ...(threadId ? { threadId } : {}),
           })) {
             if (
               event.type === "artifact.ready" &&

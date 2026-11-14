@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUserId } from "../lib/auth.js";
 import { ProjectNameError, createProjectsService } from "../features/projects/projects.service.js";
 import type { ProjectsRepository } from "../features/projects/projects.repository.js";
+import { getWorkspaceRepository } from "../features/workspace/workspace.repository.js";
 
 type Params = { id: string };
 type Body = { name?: unknown };
@@ -48,8 +49,34 @@ export function registerProjectRoutes(app: FastifyInstance, repo: ProjectsReposi
   );
 
   app.post<{ Params: Params }>("/projects/:id/delete", async (request, reply) => {
-    const ok = await service.remove(await requireUserId(request), request.params.id);
+    const userId = await requireUserId(request);
+    const project = await repo.find(userId, request.params.id);
+    if (!project) return reply.code(404).send({ error: "项目不存在" });
+
+    let threadId: string | undefined;
+    try {
+      const workspaceRepo = await getWorkspaceRepository();
+      threadId = await workspaceRepo?.getThreadId(request.params.id);
+    } catch {
+      // 没有 thread / 迁移未执行都不影响删除
+    }
+
+    const ok = await service.remove(userId, request.params.id);
     if (!ok) return reply.code(404).send({ error: "项目不存在" });
+
+    if (threadId) {
+      try {
+        const { deleteThreadCheckpoints } = await import(
+          "../features/agent/persistence/checkpointer.js"
+        );
+        await deleteThreadCheckpoints(threadId);
+      } catch (err) {
+        request.log.warn(
+          { err: err instanceof Error ? err.message : err },
+          "checkpoint 清理失败（项目已删除）",
+        );
+      }
+    }
     return reply.code(204).send();
   });
 }

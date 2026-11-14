@@ -17,7 +17,7 @@
 | G10 多版本交错 | 部分 | 渲染链路已单测 parts 顺序；未跑完整双图真实生成 |
 | G11 工具失败 | 部分 | 失败卡片与错误透传已有；未做统一场景 |
 | G12 用户取消 | 部分 | 取消事件已有；未跑视频中途取消 |
-| G13 刷新恢复 | 通过（Phase 1a/1b） | 消息、画布、Excalidraw files、聊天附件均落 Supabase/Storage，跨进程验证通过；checkpointer 未接 |
+| G13 刷新恢复 | 通过（Phase 1a/1b/1d） | 消息、画布、Excalidraw files、聊天附件均落 Supabase/Storage；checkpointer 跨进程恢复 thread，杀进程后第三轮仍答出 ORBIT-9（`docs/notes/M16.md`） |
 | G14 画布缩放 | 通过 | 实测只调 manipulate_canvas resize |
 | G15 纯文字任务 | 通过 | 不调用视觉工具 |
 | G16 跨轮引用已生成图片 | 部分（Phase 1c） | 资产账本与 `<project_assets>` 已通：预置资产问标题，真实模型答对；完整“画布删图后改图”还需一次真实生成手测 |
@@ -25,7 +25,7 @@
 
 ## 当前失败/缺口
 
-1. G13：checkpointer 未接，工具调用细节不能恢复；用户可见内容已恢复。
+1. G13：checkpointer 已接，跨进程 thread 恢复通过；删除项目时 checkpoint 清理未做。
 2. G10/G11/G12 需要自动化或可重复手测脚本，避免每次靠人工。
 3. G16 的“真实生成→删图→改图”闭环未跑；G17–G21、G23 依赖分镜（Phase 2.5）。
 4. G09 补一次真实画布删除测试。

@@ -32,18 +32,40 @@ export function buildApp() {
     return reply.code(500).send({ error: "服务器错误" });
   });
 
-  app.get("/health", async () => ({
-    ok: true,
-    name: APP_NAME,
-    store: env.projectsStore,
-    generation: env.generationMode,
-    uptime: Math.round(process.uptime()),
-    pid: process.pid,
-    startedAt,
-    traceDir: TRACE_DIR,
-  }));
+  app.get("/health", async () => {
+    let checkpointer: unknown = { status: "unavailable" };
+    try {
+      const { getCheckpointerStatus } = await import(
+        "./features/agent/persistence/checkpointer.js"
+      );
+      checkpointer = getCheckpointerStatus();
+    } catch {
+      // 依赖未安装时不影响健康检查
+    }
+    return {
+      ok: true,
+      name: APP_NAME,
+      store: env.projectsStore,
+      generation: env.generationMode,
+      uptime: Math.round(process.uptime()),
+      pid: process.pid,
+      startedAt,
+      traceDir: TRACE_DIR,
+      checkpointer,
+    };
+  });
 
   app.log.info({ traceDir: TRACE_DIR, pid: process.pid }, "运行 trace 已启用");
+
+  // 预热执行记忆；失败只 warning，不阻塞消息/画布
+  void import("./features/agent/persistence/checkpointer.js")
+    .then((mod) => mod.getCheckpointer())
+    .catch((err) => {
+      app.log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "checkpointer 未启用（依赖缺失或数据库不可达）",
+      );
+    });
 
   const repo =
     env.projectsStore === "supabase" ? createSupabaseProjectsRepository() : createMemoryProjectsRepository();

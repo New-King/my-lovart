@@ -9,6 +9,8 @@ export const env = {
 
   supabaseUrl: required("SUPABASE_URL"),
   supabaseServiceKey: required("SUPABASE_SERVICE_ROLE_KEY"),
+  /** Postgres 直连/pooler 地址，checkpointer 用；没有就退化为无执行记忆 */
+  supabaseDbUrl: required("SUPABASE_DB_URL"),
 
   // memory: 进程内存，重启即清空；supabase: 连真实数据库
   projectsStore: (required("PROJECTS_STORE", "supabase") === "supabase" ? "supabase" : "memory") as
