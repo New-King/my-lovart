@@ -34,9 +34,9 @@ type ImageDataInput = {
 };
 
 /**
- * 布局全部按当前视口的百分比算，不写死像素：
- * 单图最大占视口宽 18%、高 34%，边距 4%/6%，间距 2%/3%。
- * 换算成场景坐标时再除以 zoom，所以不同缩放下视觉比例一致。
+ * 布局全部按画布维度的百分比算，不写死像素也不按 zoom 补偿：
+ * 单图最大占画布宽 18%、高 34%，边距 4%/6%，间距 2%/3%。
+ * 尺寸落在场景坐标里是固定的，所以缩放画布时新旧图片视觉上一起变大变小。
  */
 const CELL_WIDTH_RATIO = 0.18;
 const CELL_HEIGHT_RATIO = 0.34;
@@ -46,7 +46,6 @@ const GAP_X_RATIO = 0.02;
 const GAP_Y_RATIO = 0.03;
 
 type LayoutMetrics = {
-  zoom: number;
   originX: number;
   originY: number;
   cellWidth: number;
@@ -96,22 +95,22 @@ function liveElements(api: ExcalidrawImperativeAPI) {
 
 function layoutMetrics(api: ExcalidrawImperativeAPI): LayoutMetrics {
   const appState = api.getAppState();
-  const zoom = appState.zoom?.value && appState.zoom.value > 0.05 ? appState.zoom.value : 1;
-  const viewportWidth = Math.max(320, appState.width || 0) / zoom;
-  const viewportHeight = Math.max(240, appState.height || 0) / zoom;
+  // 用画布维度（场景单位）的百分比作为图片尺寸基准，不除以 zoom。
+  // 这样图片尺寸是场景坐标里的固定比例，放大画布时新旧图片会一起变大。
+  const canvasWidth = Math.max(320, appState.width || 0);
+  const canvasHeight = Math.max(240, appState.height || 0);
   const topLeft = viewportCoordsToSceneCoords(
     { clientX: appState.offsetLeft, clientY: appState.offsetTop },
     appState,
   );
 
   return {
-    zoom,
-    originX: topLeft.x + viewportWidth * PAD_X_RATIO,
-    originY: topLeft.y + viewportHeight * PAD_Y_RATIO,
-    cellWidth: viewportWidth * CELL_WIDTH_RATIO,
-    cellHeight: viewportHeight * CELL_HEIGHT_RATIO,
-    gapX: viewportWidth * GAP_X_RATIO,
-    gapY: viewportHeight * GAP_Y_RATIO,
+    originX: topLeft.x + canvasWidth * PAD_X_RATIO,
+    originY: topLeft.y + canvasHeight * PAD_Y_RATIO,
+    cellWidth: canvasWidth * CELL_WIDTH_RATIO,
+    cellHeight: canvasHeight * CELL_HEIGHT_RATIO,
+    gapX: canvasWidth * GAP_X_RATIO,
+    gapY: canvasHeight * GAP_Y_RATIO,
   };
 }
 
