@@ -20,14 +20,17 @@
 | G13 刷新恢复 | 通过（Phase 1a/1b） | 消息、画布、Excalidraw files、聊天附件均落 Supabase/Storage，跨进程验证通过；checkpointer 未接 |
 | G14 画布缩放 | 通过 | 实测只调 manipulate_canvas resize |
 | G15 纯文字任务 | 通过 | 不调用视觉工具 |
+| G16 跨轮引用已生成图片 | 部分（Phase 1c） | 资产账本与 `<project_assets>` 已通：预置资产问标题，真实模型答对；完整“画布删图后改图”还需一次真实生成手测 |
+| G22 无分镜无资产 | 通过（Phase 1c） | 空项目不注入 `<project_state>` / `<project_assets>`，不主动汇报空状态 |
 
 ## 当前失败/缺口
 
-1. G13：持久化未做，是最高优先级。
+1. G13：checkpointer 未接，工具调用细节不能恢复；用户可见内容已恢复。
 2. G10/G11/G12 需要自动化或可重复手测脚本，避免每次靠人工。
-3. G09 补一次真实画布删除测试。
-4. 没有脚本记录 trace，失败时只能看截图。
+3. G16 的“真实生成→删图→改图”闭环未跑；G17–G21、G23 依赖分镜（Phase 2.5）。
+4. G09 补一次真实画布删除测试。
+5. 异步作业、服务端画布写入、视频播放仍是 P0 缺口（见 `docs/notes/AUDIT-vs-lavart-v2.md`）。
 
 ## 下一步
 
-Phase 1：migration 0002 → workspace repository → canvas/messages 读写 Supabase → 文件存储 → 稳定 asset_id → checkpointer。完成后重跑 G13 和受影响场景。
+Phase 1d：PostgresSaver + thread_id、上下文/视觉预算；随后 Phase 2 作业化 + 服务端画布写入 + 视频播放。完成后重跑 G13 和受影响场景。

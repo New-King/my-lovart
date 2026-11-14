@@ -1,4 +1,5 @@
 import type { ChatAttachment } from "@my-lovart/shared";
+import type { ProjectAsset } from "../assets/assets.js";
 import { fileDataUrlFromUrl } from "../files/file.store.js";
 
 export type AgentAttachmentItem = {
@@ -30,6 +31,8 @@ export type CanvasElementBrief = {
   y: number;
   width: number;
   height: number;
+  /** 如果是项目产物，这里是稳定的资产 id（与 element id 不同） */
+  assetId?: string;
 };
 
 export type CanvasContext = {
@@ -120,6 +123,48 @@ async function resolveReference(url: string): Promise<string | undefined> {
   return fileDataUrlFromUrl(url);
 }
 
+export type ProjectAssetsContext = {
+  xml: string;
+  /** 实际注入的资产（按时间倒序） */
+  injected: ProjectAsset[];
+};
+
+const ASSET_CONTEXT_LIMIT = 12;
+const ASSET_PROMPT_PREVIEW = 240;
+
+/**
+ * 项目产物摘要。给稳定 id、标题、prompt 摘要和尺寸，
+ * 完整 prompt/血缘通过 get_asset / list_assets 查，避免每轮塞满上下文。
+ */
+export function buildProjectAssetsContext(
+  assets: ProjectAsset[],
+  limit = ASSET_CONTEXT_LIMIT,
+): ProjectAssetsContext {
+  const injected = [...assets]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
+  if (injected.length === 0) return { xml: "", injected: [] };
+
+  const lines = injected.map((asset) => {
+    const prompt = asset.prompt.replace(/\s+/g, " ").trim().slice(0, ASSET_PROMPT_PREVIEW);
+    const metaParts: string[] = [
+      `kind="${asset.kind}"`,
+      `title="${escapeXml(asset.title)}"`,
+    ];
+    if (asset.model) metaParts.push(`model="${escapeXml(asset.model)}"`);
+    if (asset.width && asset.height) metaParts.push(`size="${asset.width}x${asset.height}"`);
+    if (asset.durationSeconds) metaParts.push(`duration="${asset.durationSeconds}"`);
+    if (asset.shotId) metaParts.push(`shot_id="${escapeXml(asset.shotId)}"`);
+    const meta = metaParts.join(" ");
+    return `  <asset id="${escapeXml(asset.id)}" ${meta}>${escapeXml(prompt)}</asset>`;
+  });
+
+  return {
+    injected,
+    xml: `<project_assets count="${injected.length}">\n${lines.join("\n")}\n</project_assets>`,
+  };
+}
+
 /** 画布摘要：位置、尺寸、标题；给每个元素一个短别名，图片额外给可给工具用的 asset_id */
 export function buildCanvasContext(
   elements: unknown[],
@@ -140,16 +185,30 @@ export function buildCanvasContext(
     const width = Math.max(1, Math.round(Number(element.width) || 0));
     const height = Math.max(1, Math.round(Number(element.height) || 0));
     const alias = `canvas-${briefs.length + 1}`;
-    const custom = element.customData as { name?: unknown } | undefined;
+    const custom = element.customData as { name?: unknown; title?: unknown; assetId?: unknown } | undefined;
 
     let name = TYPE_LABELS[element.type] ?? element.type;
-    if (typeof custom?.name === "string" && custom.name.trim()) {
+    if (typeof custom?.title === "string" && custom.title.trim()) {
+      name = custom.title.trim().slice(0, 40);
+    } else if (typeof custom?.name === "string" && custom.name.trim()) {
       name = custom.name.trim().slice(0, 40);
     } else if (element.type === "text" && typeof element.text === "string") {
       name = element.text.trim().slice(0, 40) || "文字";
     }
 
-    briefs.push({ id: element.id, alias, type: element.type, name, x, y, width, height });
+    briefs.push({
+      id: element.id,
+      alias,
+      type: element.type,
+      name,
+      x,
+      y,
+      width,
+      height,
+      ...(typeof custom?.assetId === "string" && custom.assetId
+        ? { assetId: custom.assetId }
+        : {}),
+    });
   }
 
   if (briefs.length === 0) {
@@ -171,7 +230,7 @@ export function buildCanvasContext(
     if (!raw) continue;
 
     lines.push(
-      `- [${brief.alias}] ${brief.type} id=${brief.id} 「${brief.name}」 @ (${brief.x}, ${brief.y}) ${brief.width}×${brief.height}`,
+      `- [${brief.alias}] ${brief.type} id=${brief.id}${brief.assetId ? ` asset=${brief.assetId}` : ""} 「${brief.name}」 @ (${brief.x}, ${brief.y}) ${brief.width}×${brief.height}`,
     );
 
     if (brief.type !== "image") continue;
@@ -181,10 +240,11 @@ export function buildCanvasContext(
     const file = files[fileId] as { dataURL?: unknown } | undefined;
     if (typeof file?.dataURL === "string") {
       map[brief.alias] = file.dataURL;
+      if (brief.assetId) map[brief.assetId] = file.dataURL;
     }
 
     xmlLines.push(
-      `  <image asset_id="${brief.alias}" name="${escapeXml(brief.name)}" x="${brief.x}" y="${brief.y}" width="${brief.width}" height="${brief.height}" />`,
+      `  <image canvas_alias="${brief.alias}"${brief.assetId ? ` asset_id="${escapeXml(brief.assetId)}"` : ""} name="${escapeXml(brief.name)}" x="${brief.x}" y="${brief.y}" width="${brief.width}" height="${brief.height}" />`,
     );
   }
 

@@ -13,8 +13,9 @@ import { createDeepAgent } from "deepagents";
 import { randomUUID } from "node:crypto";
 import { env } from "../../lib/env.js";
 import type { Trace } from "../../lib/trace.js";
+import type { ProjectAsset } from "../assets/assets.js";
 import { AgentEventBus } from "./bus.js";
-import { buildAttachmentContext, buildCanvasContext } from "./context.js";
+import { buildAttachmentContext, buildCanvasContext, buildProjectAssetsContext } from "./context.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { createAgentTools } from "./tools.js";
 
@@ -27,6 +28,8 @@ export type AgentRunInput = {
   kind: "auto" | "image" | "video";
   aspectRatio?: AspectRatio;
   attachments: ChatAttachment[];
+  /** 项目产物账本（按时间倒序），跨轮引用图片/视频用 */
+  projectAssets: ProjectAsset[];
   history: { role: "user" | "assistant"; content: string }[];
   canvasElements: unknown[];
   canvasFiles: Record<string, unknown>;
@@ -69,6 +72,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   const bus = new AgentEventBus();
   const attachmentContext = await buildAttachmentContext(input.attachments);
   const canvasContext = buildCanvasContext(input.canvasElements, input.canvasFiles);
+  const projectAssetsContext = buildProjectAssetsContext(input.projectAssets);
   input.trace?.event("agent.context", {
     attachments: attachmentContext.items,
     visionCount: Object.keys(attachmentContext.map).length,
@@ -76,12 +80,15 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     canvasElementCount: canvasContext.elements.length,
     canvasSummary: canvasContext.summary,
     canvasXml: canvasContext.xml,
+    projectAssetCount: input.projectAssets.length,
+    projectAssetXml: projectAssetsContext.xml,
   });
   const tools = createAgentTools({
     bus,
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
     canvasSummary: canvasContext.summary,
     canvasElements: canvasContext.elements,
+    projectAssets: input.projectAssets,
     baseUrl: input.baseUrl,
     signal: input.signal,
   });
@@ -106,6 +113,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     attachmentContext.xml,
     canvasContext.summary,
     canvasContext.xml,
+    projectAssetsContext.xml,
     Object.keys(attachmentContext.map).length > 0,
   );
   const messages = [
@@ -406,6 +414,7 @@ function buildUserText(
   attachmentXml: string,
   canvasSummary: string,
   canvasXml: string,
+  projectAssetsXml: string,
   hasVision: boolean,
 ): string {
   const blocks = [input.text || "参考图生成"];
@@ -413,6 +422,12 @@ function buildUserText(
     blocks.push(`<canvas_state>\n${canvasSummary}\n</canvas_state>`);
   }
   if (canvasXml) blocks.push(canvasXml);
+  if (projectAssetsXml) {
+    blocks.push(projectAssetsXml);
+    blocks.push(
+      "<project_assets_note>这些是项目里生成过的资产，id 稳定；引用旧图、改图、分镜重做时先用 list_assets/get_asset，不要凭记忆或画布位置猜。</project_assets_note>",
+    );
+  }
   if (attachmentXml) {
     blocks.push(attachmentXml);
     blocks.push(

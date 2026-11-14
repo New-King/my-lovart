@@ -1,8 +1,8 @@
 # 项目状态、产物账本与分镜 · 设计
 
-> 状态：提案（Proposed）  
+> 状态：Phase 1c 已实现；1d / 2.5 待做  
 > 最后更新：2026-11-14  
-> 关联：`ROADMAP.md`、`docs/specs/golden-scenarios.md`
+> 关联：`ROADMAP.md`、`docs/specs/golden-scenarios.md`、`docs/notes/M15.md`
 
 ## 结论先行
 

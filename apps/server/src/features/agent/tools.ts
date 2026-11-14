@@ -7,7 +7,8 @@ import type {
   VideoBlock,
 } from "@my-lovart/shared";
 import { z } from "zod";
-import { importRemoteFile } from "../files/file.store.js";
+import type { ProjectAsset } from "../assets/assets.js";
+import { fileDataUrlFromUrl, importRemoteFile } from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
 import { GenerationError, isAbortError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
@@ -99,11 +100,23 @@ const choicesSchema = z.object({
     .describe("1-3 个互斥的候选答案，必须是用户对上一个问题的回答，不是下一步动作或寒暄"),
 });
 
+const listAssetsSchema = z.object({
+  query: z.string().optional().describe("按标题、prompt、模型或分镜 id 模糊搜索"),
+  kind: z.enum(["image", "video"]).optional(),
+  limit: z.number().int().min(1).max(20).optional().default(10),
+});
+
+const getAssetSchema = z.object({
+  assetId: z.string().min(1).describe("资产 id，来自 <project_assets> 或 list_assets 结果"),
+});
+
 type ToolContext = {
   bus: AgentEventBus;
   attachmentMap: Record<string, string>;
   canvasSummary: string;
   canvasElements: CanvasElementBrief[];
+  /** 项目产物账本（按时间倒序）；用于跨轮引用和分镜 */
+  projectAssets: ProjectAsset[];
   baseUrl: string;
   signal: AbortSignal;
 };
@@ -117,7 +130,11 @@ export function createAgentTools(context: ToolContext) {
           const result = await generateImageWithVolces({
             prompt: input.prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
-            referenceImages: resolveReferences(input.inputImages, context.attachmentMap),
+            referenceImages: await resolveReferences(
+              input.inputImages,
+              context.attachmentMap,
+              context.projectAssets,
+            ),
             signal: context.signal,
           });
 
@@ -134,9 +151,11 @@ export function createAgentTools(context: ToolContext) {
             mimeType: stored?.mimeType ?? result.mimeType,
             width: result.width,
             height: result.height,
-            prompt: input.prompt.slice(0, 200),
+            title: input.title,
+            prompt: input.prompt.slice(0, 2000),
             model: "Seedream 5.0 Lite",
             aspectRatio: input.aspectRatio,
+            sourceAssetIds: input.inputImages ?? [],
           };
 
           return JSON.stringify({
@@ -163,7 +182,13 @@ export function createAgentTools(context: ToolContext) {
             prompt: input.prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
             durationSeconds: input.durationSeconds ?? 8,
-            referenceImages: resolveReferences(input.inputImages, context.attachmentMap).slice(0, 2),
+            referenceImages: (
+              await resolveReferences(
+                input.inputImages,
+                context.attachmentMap,
+                context.projectAssets,
+              )
+            ).slice(0, 2),
             signal: context.signal,
             onProgress: (progress, stage) =>
               context.bus.push({ type: "progress", progress, stage }),
@@ -182,8 +207,10 @@ export function createAgentTools(context: ToolContext) {
             width: result.width,
             height: result.height,
             durationSeconds: result.durationSeconds,
-            prompt: input.prompt.slice(0, 200),
+            title: input.title,
+            prompt: input.prompt.slice(0, 2000),
             model: "MiniMax H3",
+            sourceAssetIds: input.inputImages ?? [],
           };
 
           return JSON.stringify({
@@ -224,6 +251,78 @@ export function createAgentTools(context: ToolContext) {
         description:
           "在正文里问完一个关键问题后调用，把 1-3 个互斥的候选答案变成按钮。只在用户已给出大部分需求、只差一个关键项，且这个问题有清晰离散答案时使用。不要用它给下一步建议、确认收到、催用户上传或替代开放性问题；用户仍可直接输入其他答案。",
         schema: choicesSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        const query = input.query?.trim().toLowerCase();
+        const assets = context.projectAssets
+          .filter((asset) => !input.kind || asset.kind === input.kind)
+          .filter((asset) => {
+            if (!query) return true;
+            return [asset.title, asset.prompt, asset.model ?? "", asset.shotId ?? ""]
+              .join(" ")
+              .toLowerCase()
+              .includes(query);
+          })
+          .slice(0, input.limit ?? 10)
+          .map((asset) => ({
+            id: asset.id,
+            kind: asset.kind,
+            title: asset.title,
+            prompt: asset.prompt.slice(0, 600),
+            ...(asset.model ? { model: asset.model } : {}),
+            width: asset.width,
+            height: asset.height,
+            ...(asset.durationSeconds ? { durationSeconds: asset.durationSeconds } : {}),
+            ...(asset.shotId ? { shotId: asset.shotId } : {}),
+            createdAt: asset.createdAt,
+          }));
+
+        return JSON.stringify({
+          summary: assets.length
+            ? `找到 ${assets.length} 个项目资产`
+            : "项目资产里没有匹配项",
+          assets,
+        });
+      },
+      {
+        name: "list_assets",
+        description:
+          "查询项目里生成过的图片/视频资产。按标题、prompt、模型或分镜筛选；只返回摘要，完整 prompt 用 get_asset。跨轮引用上一轮结果、版本对比、分镜找镜头当前资产时使用。",
+        schema: listAssetsSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        const asset = context.projectAssets.find((item) => item.id === input.assetId);
+        if (!asset) {
+          return JSON.stringify({
+            error: `找不到资产 ${input.assetId}。请用 <project_assets> 或 list_assets 里的 id，不要编造。`,
+          });
+        }
+        return JSON.stringify({
+          asset: {
+            id: asset.id,
+            kind: asset.kind,
+            title: asset.title,
+            prompt: asset.prompt,
+            ...(asset.model ? { model: asset.model } : {}),
+            width: asset.width,
+            height: asset.height,
+            ...(asset.durationSeconds ? { durationSeconds: asset.durationSeconds } : {}),
+            ...(asset.aspectRatio ? { aspectRatio: asset.aspectRatio } : {}),
+            ...(asset.shotId ? { shotId: asset.shotId } : {}),
+            sourceAssetIds: asset.sourceAssetIds,
+            createdAt: asset.createdAt,
+          },
+        });
+      },
+      {
+        name: "get_asset",
+        description:
+          "按资产 id 取完整 prompt、模型、尺寸和来源血缘。用户要基于某张旧图重做、对比版本或引用分镜镜头资产时调用。",
+        schema: getAssetSchema,
       },
     ),
     tool(
@@ -346,20 +445,38 @@ function resolveCanvasCommands(
   return { commands };
 }
 
-function resolveReferences(
+async function resolveReferences(
   input: string[] | undefined,
   attachmentMap: Record<string, string>,
-): string[] {
+  projectAssets: ProjectAsset[],
+): Promise<string[]> {
   if (!input?.length) return [];
-  return input
-    .map((item) =>
-      item.startsWith("asset-")
-        ? attachmentMap[item]
-        : item.startsWith("http") || item.startsWith("data:")
-          ? item
-          : attachmentMap[item],
-    )
-    .filter((item): item is string => Boolean(item));
+  const resolved: string[] = [];
+
+  for (const item of input) {
+    const direct = attachmentMap[item];
+    if (direct) {
+      resolved.push(direct);
+      continue;
+    }
+
+    if (item.startsWith("http") || item.startsWith("data:")) {
+      resolved.push(item);
+      continue;
+    }
+
+    // 项目资产（即使已经从画布删掉）：把本地 /files 地址转成 data URL 再给 provider
+    const asset = projectAssets.find((entry) => entry.id === item);
+    if (!asset) continue;
+    const dataUrl = await fileDataUrlFromUrl(asset.url);
+    if (dataUrl) {
+      resolved.push(dataUrl);
+    } else if (asset.url.startsWith("http")) {
+      resolved.push(asset.url);
+    }
+  }
+
+  return resolved;
 }
 
 function errorResult(error: unknown): string {

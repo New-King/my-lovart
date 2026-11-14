@@ -20,6 +20,10 @@ export type CanvasImageInput = {
   placement?: CanvasImagePlacement;
   /** 同批次的图片会排在同一行；不传则单独占一行 */
   batchId?: string;
+  /** 产物账本 id，和画布 elementId 不是一回事 */
+  assetId?: string;
+  title?: string;
+  prompt?: string;
 };
 
 type ImageDataInput = {
@@ -30,6 +34,9 @@ type ImageDataInput = {
   height?: number;
   placement?: CanvasImagePlacement;
   batchId?: string;
+  assetId?: string;
+  title?: string;
+  prompt?: string;
 };
 
 /**
@@ -301,6 +308,9 @@ async function insertImageData(
       status: "saved",
       customData: {
         name: input.name,
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.assetId ? { assetId: input.assetId } : {}),
+        ...(input.prompt ? { prompt: input.prompt.slice(0, 500) } : {}),
         ...(input.batchId ? { batchId: input.batchId } : {}),
       },
     },
@@ -332,6 +342,9 @@ export async function insertImageIntoCanvas(
     height: input.height,
     placement: input.placement,
     batchId: input.batchId,
+    assetId: input.assetId,
+    title: input.title,
+    prompt: input.prompt,
   });
 }
 

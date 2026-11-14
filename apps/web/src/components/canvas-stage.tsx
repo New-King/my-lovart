@@ -64,6 +64,9 @@ export type CanvasStageHandle = {
     width?: number;
     height?: number;
     batchId?: string;
+    assetId?: string;
+    title?: string;
+    prompt?: string;
     /** 生成链路自动入画布时不弹 toast */
     silent?: boolean;
   }) => Promise<void>;
@@ -317,6 +320,9 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           height: payload.height,
           placement: point ?? undefined,
           ...(payload.batchId ? { batchId: payload.batchId } : {}),
+          ...(payload.assetId ? { assetId: payload.assetId } : {}),
+          ...(payload.title ? { title: payload.title } : {}),
+          ...(payload.prompt ? { prompt: payload.prompt } : {}),
         });
         await waitAtLeast(started, silent ? 0 : 350);
         if (!silent) showToast("success", "图片已添加到画布");
@@ -342,6 +348,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             width: input.width,
             height: input.height,
             ...(input.batchId ? { batchId: input.batchId } : {}),
+            ...(input.assetId ? { assetId: input.assetId } : {}),
+            ...(input.prompt ? { prompt: input.prompt } : {}),
           },
           null,
           input.silent ?? false,

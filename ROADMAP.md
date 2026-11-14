@@ -32,7 +32,7 @@
 - [x] 参考图视觉输入（最近 4 张 image_url）
 - [x] 输入框收敛为 + / 发送，画幅交给模型
 - [x] 持久化线程与画布/文件
-- [ ] 产物账本（标题/prompt/模型/血缘/版本）
+- [x] 产物账本（标题/prompt/模型/血缘/版本）
 - [ ] 分镜与镜头状态
 - [ ] 生成作业队列
 - [ ] 画布工具深度（add_text/add_shape/add_line/update_text/update_style）
@@ -65,18 +65,19 @@
 - [x] workspace 路由校验 project 归属
 - [x] 持久化验收脚本 `pnpm --filter @my-lovart/server verify:persistence`
 
-### 1c · 产物账本（下一步）
+### 1c · 产物账本（已完成）
 
 目标：生成图片/视频的标题、完整 prompt、模型、来源、版本，下一轮还能准确找到。
 
-- [ ] migration 0003：`project_assets`
-- [ ] `ImageBlock`/`VideoBlock` 增加 `title`，工具结果写入完整 prompt 与 `sourceAssetIds`
-- [ ] artifact 落库为不可变资产；画布元素写 `customData.assetId`
-- [ ] 每轮注入 `<project_assets>` 摘要
-- [ ] `list_assets` / `get_asset` 工具
-- [ ] `verify:assets` 验收脚本，跑 G16/G22
+- [x] migration 0003：`project_assets`（已执行）
+- [x] `ImageBlock`/`VideoBlock` 增加 `title`，工具结果写入完整 prompt 与 `sourceAssetIds`
+- [x] artifact 落库为不可变资产；画布元素写 `customData.assetId / title`
+- [x] 每轮注入 `<project_assets>` 摘要
+- [x] `list_assets` / `get_asset` 工具
+- [x] `verify:assets` 验收脚本
 
-验收：删掉画布图片后，仍能用「刚才那张咖啡海报」找到 asset_id 和 prompt 并改图。
+验收：删掉画布图片后，仍能用「刚才那张咖啡海报」找到 asset_id 和 prompt 并改图。  
+验证记录：`docs/notes/M15.md`；真实 HTTP 问标题返回正确，mock 生成 3 个 artifact 全部入账。
 
 ### 1d · 执行记忆
 
@@ -146,5 +147,5 @@
 
 ## 下一步（只做这一件）
 
-Phase 1c：migration 0003 建 `project_assets`，把 artifact 的 title/prompt/model/血缘落库，并每轮注入 `<project_assets>` + `list_assets/get_asset`。  
-在资产账本跑通前，不动分镜工具，也不把分镜数据塞进自然语言历史。
+Phase 1d：接 LangGraph `PostgresSaver` + `thread_id`，让工具调用与结果跨轮/跨进程恢复；同时把视觉附件与历史做成预算，避免 checkpointer 和手工 history 重复。  
+1c 已能解决“图片简介/完整 prompt 下一轮看不到”，1d 解决“工具执行细节与线程恢复”。

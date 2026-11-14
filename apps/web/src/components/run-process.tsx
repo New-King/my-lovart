@@ -5,11 +5,14 @@ import {
   AlertCircle,
   ChevronDown,
   Clapperboard,
+  FileSearch,
   ImagePlus,
   Lightbulb,
+  ListChecks,
   Loader2,
   Move,
   Search,
+  ScanEye,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
@@ -18,6 +21,10 @@ const TOOL_ICONS = {
   generate_image: ImagePlus,
   generate_video: Clapperboard,
   manipulate_canvas: Move,
+  inspect_canvas: ScanEye,
+  offer_choices: ListChecks,
+  list_assets: FileSearch,
+  get_asset: FileSearch,
   search_inspiration: Search,
 } as const;
 

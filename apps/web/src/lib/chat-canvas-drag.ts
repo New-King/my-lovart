@@ -9,6 +9,9 @@ export type ChatImageDragPayload = {
   width?: number;
   height?: number;
   batchId?: string;
+  /** 产物账本 id，拖到画布后仍能追到来源 */
+  assetId?: string;
+  prompt?: string;
 };
 
 const payloads = new Map<string, ChatImageDragPayload>();

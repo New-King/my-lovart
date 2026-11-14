@@ -3,11 +3,19 @@ import type {
   AspectRatio,
   ChatAttachment,
   ChatMessage,
+  ImageBlock,
   RunError,
   RunEvent,
+  VideoBlock,
 } from "@my-lovart/shared";
 import { env } from "../../lib/env.js";
 import { createTrace } from "../../lib/trace.js";
+import {
+  collectLegacyAssets,
+  mergeAssets,
+  type ProjectAsset,
+} from "../assets/assets.js";
+import { getAssetsRepository } from "../assets/assets.repository.js";
 import { normalizeAttachment } from "../files/file.store.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
 import {
@@ -190,6 +198,21 @@ export function createWorkspaceService(
         }))
         .filter((message) => message.content);
 
+      const assetRepo = await getAssetsRepository();
+      let storedAssets: ProjectAsset[] = [];
+      try {
+        storedAssets = await assetRepo.list(projectId, 40);
+      } catch (err) {
+        console.warn(
+          "[assets] 读取产物账本失败，先使用消息里的旧产物：",
+          err instanceof Error ? err.message : err,
+        );
+      }
+      const projectAssets = mergeAssets(
+        storedAssets,
+        collectLegacyAssets(ensureWorkspace(projectId).messages),
+      );
+
       const trace = createTrace(runId, {
         projectId,
         messageId,
@@ -209,11 +232,36 @@ export function createWorkspaceService(
               : "remote-url",
         })),
         historyCount: history.length,
+        projectAssetCount: projectAssets.length,
         history: history.map((message) => ({
           role: message.role,
           preview: message.content.slice(0, 120),
         })),
       });
+
+      const persistArtifact = async (
+        artifact: ImageBlock | VideoBlock,
+        at: string,
+      ): Promise<void> => {
+        const asset = assetFromArtifact(projectId, messageId, artifact, at);
+        try {
+          await assetRepo.save(projectId, asset);
+          trace.event("asset.saved", {
+            id: asset.id,
+            kind: asset.kind,
+            title: asset.title,
+          });
+        } catch (err) {
+          console.warn(
+            "[assets] 产物落账本失败：",
+            err instanceof Error ? err.message : err,
+          );
+          trace.event("asset.save_failed", {
+            id: asset.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
 
       try {
         if (env.generationMode === "real") {
@@ -253,6 +301,7 @@ export function createWorkspaceService(
               ensureWorkspace(projectId),
               input.attachments ?? [],
             ),
+            projectAssets,
             history,
             canvasElements: ensureWorkspace(projectId).elements,
             canvasFiles: ensureWorkspace(projectId).files,
@@ -260,6 +309,12 @@ export function createWorkspaceService(
             signal,
             trace,
           })) {
+            if (
+              event.type === "artifact.ready" &&
+              (event.artifact.type === "image" || event.artifact.type === "video")
+            ) {
+              await persistArtifact(event.artifact, event.at);
+            }
             applyEvent(projectId, messageId, event);
             const terminal =
               event.type === "run.completed" ||
@@ -283,6 +338,12 @@ export function createWorkspaceService(
           attachments: input.attachments ?? [],
           signal,
         })) {
+          if (
+            event.type === "artifact.ready" &&
+            (event.artifact.type === "image" || event.artifact.type === "video")
+          ) {
+            await persistArtifact(event.artifact, event.at);
+          }
           applyEvent(projectId, messageId, event);
           const terminal =
             event.type === "run.completed" ||
@@ -325,6 +386,40 @@ export function createWorkspaceService(
         trace.event("run.finally", { status: message?.status ?? "unknown" });
       }
     },
+  };
+}
+
+function assetFromArtifact(
+  projectId: string,
+  messageId: string,
+  artifact: ImageBlock | VideoBlock,
+  at: string,
+): ProjectAsset {
+  return {
+    id: artifact.id,
+    projectId,
+    kind: artifact.type,
+    origin: "generated",
+    title:
+      artifact.title?.trim() ||
+      artifact.prompt?.trim().slice(0, 40) ||
+      (artifact.type === "video" ? "未命名视频" : "未命名图片"),
+    prompt: artifact.prompt ?? "",
+    ...(artifact.model ? { model: artifact.model } : {}),
+    url: artifact.url,
+    mimeType: artifact.mimeType,
+    width: artifact.width,
+    height: artifact.height,
+    ...(artifact.type === "video" && artifact.durationSeconds
+      ? { durationSeconds: artifact.durationSeconds }
+      : {}),
+    ...(artifact.type === "image" && artifact.aspectRatio
+      ? { aspectRatio: artifact.aspectRatio }
+      : {}),
+    sourceAssetIds: artifact.sourceAssetIds ?? [],
+    messageId,
+    metadata: artifact.batchId ? { batchId: artifact.batchId } : {},
+    createdAt: at,
   };
 }
 

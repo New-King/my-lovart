@@ -14,6 +14,10 @@ export type ToolName =
   | "generate_image"
   | "generate_video"
   | "manipulate_canvas"
+  | "inspect_canvas"
+  | "offer_choices"
+  | "list_assets"
+  | "get_asset"
   | "search_inspiration";
 export type ToolStatus = "queued" | "running" | "done" | "failed";
 
@@ -42,9 +46,13 @@ export type ImageBlock = {
   mimeType: string;
   width: number;
   height: number;
+  /** 生成时模型给这张图起的短标题，跨轮引用用 */
+  title?: string;
   prompt?: string;
   model?: string;
   aspectRatio?: string;
+  /** 图生图/参考图来源的稳定 id，不是画布 elementId */
+  sourceAssetIds?: string[];
   /** 同一次工具调用产出的资源共用一个批次，界面按批次排成一行 */
   batchId?: string;
 };
@@ -58,8 +66,10 @@ export type VideoBlock = {
   width: number;
   height: number;
   durationSeconds?: number;
+  title?: string;
   prompt?: string;
   model?: string;
+  sourceAssetIds?: string[];
   batchId?: string;
 };
 

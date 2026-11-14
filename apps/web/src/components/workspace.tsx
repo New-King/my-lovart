@@ -339,10 +339,13 @@ export function Workspace() {
       const block: ImageBlock = event.artifact;
       void canvasRef.current?.insertImage({
         url: block.url,
-        name: block.prompt || "生成图像",
+        name: block.title || block.prompt || "生成图像",
         mimeType: block.mimeType,
         width: block.width,
         height: block.height,
+        assetId: block.id,
+        ...(block.title ? { title: block.title } : {}),
+        ...(block.prompt ? { prompt: block.prompt } : {}),
         ...(block.batchId ? { batchId: block.batchId } : {}),
         silent: true,
       });
@@ -611,10 +614,13 @@ export function Workspace() {
   const handleAddToCanvas = (block: ImageBlock) => {
     void canvasRef.current?.insertImage({
       url: block.url,
-      name: block.prompt || "生成图像",
+      name: block.title || block.prompt || "生成图像",
       mimeType: block.mimeType,
       width: block.width,
       height: block.height,
+      assetId: block.id,
+      ...(block.title ? { title: block.title } : {}),
+      ...(block.prompt ? { prompt: block.prompt } : {}),
       ...(block.batchId ? { batchId: block.batchId } : {}),
     });
   };
