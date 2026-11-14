@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { RunEvent } from "@my-lovart/shared";
+import type { ChatMessage, RunEvent } from "@my-lovart/shared";
 import { env } from "../lib/env.js";
 import { requireUserId } from "../lib/auth.js";
 import { LlmError } from "../lib/llm.js";
@@ -113,8 +113,9 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
       }
       const aspectRatio = normalizeAspect(body.aspectRatio);
 
+      let userMessage: ChatMessage;
       try {
-        service.appendUserMessage(projectId, text, attachments);
+        userMessage = service.appendUserMessage(projectId, text, attachments);
       } catch (err) {
         if (err instanceof WorkspaceInputError) {
           return reply.code(400).send({ error: err.message });
@@ -130,7 +131,14 @@ export function registerWorkspaceRoutes(app: FastifyInstance) {
       try {
         for await (const event of service.run(
           projectId,
-          { text, kind: "auto", aspectRatio, attachments, baseUrl: baseUrlFor(request) },
+          {
+            text,
+            kind: "auto",
+            aspectRatio,
+            attachments,
+            userMessageId: userMessage.id,
+            baseUrl: baseUrlFor(request),
+          },
           controller.signal,
         )) {
           if (!stream.send(event)) break;

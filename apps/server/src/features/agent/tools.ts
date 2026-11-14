@@ -227,7 +227,8 @@ export function createAgentTools(context: ToolContext) {
       },
     ),
     tool(
-      async () => JSON.stringify({ canvas: context.canvasSummary }),
+      async () =>
+        JSON.stringify({ canvas: context.canvasSummary || "画布目前为空，没有任何元素。" }),
       {
         name: "inspect_canvas",
         description: "查看当前画布上有哪些元素、它们的位置和尺寸。规划排版或改图前调用。",

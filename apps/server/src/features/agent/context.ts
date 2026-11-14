@@ -107,12 +107,9 @@ export function buildCanvasContext(
   }
 
   if (briefs.length === 0) {
-    return {
-      summary: "画布目前为空：没有任何图片或图形。不要引用画布上的图片，也不要假设用户已经上传。",
-      map: {},
-      xml: "",
-      elements: [],
-    };
+    // 和 Lavart 一样，空画布不注入 <canvas_state>；模型需要时再调用 inspect_canvas，
+    // 避免每轮都主动汇报「画布是空的」。
+    return { summary: "", map: {}, xml: "", elements: [] };
   }
 
   const map: Record<string, string> = {};

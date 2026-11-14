@@ -41,6 +41,8 @@ export type RunInput = {
   kind: MockKind;
   aspectRatio?: AspectRatio;
   attachments?: ChatAttachment[];
+  /** 当前这条用户消息的 id；历史里要排除它，避免同一条消息传两遍 */
+  userMessageId?: string;
   /** 服务端自己的公开地址，用于把生成结果落成 /files/:id */
   baseUrl?: string;
 };
@@ -111,6 +113,7 @@ export function createWorkspaceService() {
 
       const history = ensureWorkspace(projectId).messages
         .filter((message) => message.status !== "queued" && message.status !== "streaming")
+        .filter((message) => message.id !== input.userMessageId)
         .slice(-MAX_CONTEXT_MESSAGES)
         .map((message) => ({
           role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
