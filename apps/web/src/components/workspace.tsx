@@ -237,6 +237,7 @@ export function Workspace() {
   const [running, setRunning] = useState(false);
   const [mobileView, setMobileView] = useState<"chat" | "canvas">("chat");
   const [projectsOpen, setProjectsOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
   const [materialPanel, setMaterialPanel] = useState<"manage" | "select" | null>(null);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -585,13 +586,16 @@ export function Workspace() {
     onSelect: handleSelect,
     onCreate: handleCreate,
     onLogout: handleLogout,
+    onCollapse: () => setRailOpen(false),
   };
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-canvas">
-      <div className="hidden shrink-0 lg:flex">
-        <ProjectRail {...railProps} />
-      </div>
+      {railOpen && (
+        <div className="hidden shrink-0 lg:flex">
+          <ProjectRail {...railProps} />
+        </div>
+      )}
 
       <div
         className={cn(
@@ -605,8 +609,15 @@ export function Workspace() {
           elements={data?.elements ?? []}
           files={data?.files ?? {}}
           loaded={data !== null}
+          railCollapsed={!railOpen}
           onSave={handleSaveCanvas}
-          onOpenProjects={() => setProjectsOpen(true)}
+          onOpenProjects={() => {
+            if (window.matchMedia("(min-width: 1024px)").matches) {
+              setRailOpen(true);
+            } else {
+              setProjectsOpen(true);
+            }
+          }}
           onShowChat={() => setMobileView("chat")}
           onOpenMaterials={() => setMaterialPanel("manage")}
         />
@@ -631,7 +642,6 @@ export function Workspace() {
           onCreate={handleCreate}
           onSend={handleSend}
           onStop={handleStop}
-          onGenerate={(input) => void handleGenerate(input)}
           onRetry={handleRetry}
           onAddToCanvas={handleAddToCanvas}
           onOpenMaterials={() => setMaterialPanel("select")}

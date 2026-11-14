@@ -74,6 +74,12 @@
   display: none;
 }
 
+/* 点选图片不要弹出属性面板：它会挡住画布，操作走对话卡片和底部回到内容 */
+.excalidraw .selected-shape-actions,
+.excalidraw .scroll-back-to-content {
+  display: none !important;
+}
+
 /* 聊天里的 Markdown */
 @layer components {
   .media-shimmer {

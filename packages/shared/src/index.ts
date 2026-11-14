@@ -41,6 +41,8 @@ export type ImageBlock = {
   prompt?: string;
   model?: string;
   aspectRatio?: string;
+  /** 同一次工具调用产出的资源共用一个批次，界面按批次排成一行 */
+  batchId?: string;
 };
 
 export type VideoBlock = {
@@ -54,6 +56,7 @@ export type VideoBlock = {
   durationSeconds?: number;
   prompt?: string;
   model?: string;
+  batchId?: string;
 };
 
 export type InspirationItem = {
@@ -71,6 +74,7 @@ export type InspirationBlock = {
   id: string;
   query: string;
   items: InspirationItem[];
+  batchId?: string;
 };
 
 export type ChatBlock = TextBlock | ToolBlock | ImageBlock | VideoBlock | InspirationBlock;

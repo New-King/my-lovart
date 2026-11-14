@@ -356,50 +356,67 @@ export async function* createMockRun(input: MockRunInput): AsyncGenerator<RunEve
     return;
   }
 
-  const artifact: Artifact =
+  const basePrompt = input.text.slice(0, 80) || (isVideo ? "生成视频" : "生成图像");
+
+  const artifacts: Artifact[] =
     mode === "inspiration"
-      ? {
-          type: "inspiration",
-          id: randomUUID(),
-          query: "低饱和 · 编辑感 · 海报排版",
-          items: INSPIRATIONS.map<InspirationItem>((item) => ({
+      ? [
+          {
+            type: "inspiration",
             id: randomUUID(),
-            title: item.title,
-            imageUrl: item.url,
-            source: "Mock Gallery",
-            width: 800,
-            height: 600,
-          })),
-        }
+            batchId: tool.id,
+            query: "低饱和 · 编辑感 · 海报排版",
+            items: INSPIRATIONS.map<InspirationItem>((item) => ({
+              id: randomUUID(),
+              title: item.title,
+              imageUrl: item.url,
+              source: "Mock Gallery",
+              width: 800,
+              height: 600,
+            })),
+          },
+        ]
       : isVideo
-        ? {
-            type: "video",
-            id: randomUUID(),
-            url: MOCK_VIDEO_URL,
-            posterUrl: asset("/mock/video-poster.svg"),
-            mimeType: "video/mp4",
-            width: size.width,
-            height: size.height,
-            durationSeconds: 15,
-            prompt: input.text.slice(0, 80) || "生成视频",
-            model,
-          }
-        : (() => {
-            const poster = POSTERS[hashOf(input.text) % POSTERS.length] ?? POSTERS[0]!;
+        ? [
+            {
+              type: "video",
+              id: randomUUID(),
+              batchId: tool.id,
+              url: MOCK_VIDEO_URL,
+              posterUrl: asset("/mock/video-poster.svg"),
+              mimeType: "video/mp4",
+              width: size.width,
+              height: size.height,
+              durationSeconds: 15,
+              prompt: basePrompt,
+              model,
+            },
+          ]
+        : Array.from({ length: 3 }, (_, index) => {
+            const poster =
+              POSTERS[(hashOf(input.text) + index) % POSTERS.length] ?? POSTERS[0]!;
             return {
               type: "image" as const,
               id: randomUUID(),
+              batchId: tool.id,
               url: poster,
               mimeType: "image/svg+xml",
               width: size.width,
               height: size.height,
-              prompt: input.text.slice(0, 80) || "生成图像",
+              prompt: `${basePrompt} · 版本 ${index + 1}`,
               model,
               aspectRatio: ratio,
             };
-          })();
+          });
 
-  yield emit({ type: "artifact.ready", artifact });
+  for (const artifact of artifacts) {
+    if (signal.aborted) {
+      yield emit({ type: "run.canceled" });
+      return;
+    }
+    yield emit({ type: "artifact.ready", artifact });
+    await sleep(140, signal);
+  }
   yield emit({
     type: "tool.completed",
     toolCallId: tool.id,
@@ -416,7 +433,7 @@ export async function* createMockRun(input: MockRunInput): AsyncGenerator<RunEve
   const compose = step("compose", "放回画布", undefined);
   yield emit({ type: "step.started", step: compose });
   await sleep(240, signal);
-  yield emit({ type: "canvas.sync", artifactId: artifact.id });
+  yield emit({ type: "canvas.sync", artifactId: artifacts[0]?.id ?? "" });
   yield emit({
     type: "step.updated",
     stepId: compose.id,

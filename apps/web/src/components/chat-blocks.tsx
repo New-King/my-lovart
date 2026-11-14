@@ -1,19 +1,18 @@
 "use client";
 
 import type {
-  AspectRatio,
   ChatBlock,
-  GenerateRequest,
   ImageBlock,
   InspirationBlock,
+  TextBlock,
   VideoBlock,
 } from "@my-lovart/shared";
 import {
-  Copy,
+  ArrowDownRight,
   Download,
   Frame,
-  RotateCcw,
-  Search,
+  ImagePlus,
+  Play,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
@@ -24,18 +23,14 @@ import { useToast } from "./ui/toast";
 
 export type PreviewTarget = { src: string; name: string };
 
+type MediaBlock = ImageBlock | VideoBlock;
+
 type Props = {
   blocks: ChatBlock[];
   onPreview: (target: PreviewTarget) => void;
   onAddToCanvas: (block: ImageBlock) => void;
-  onGenerate: (input: GenerateRequest) => void;
+  onAddReference: (item: { url: string; name: string; mimeType: string }) => void;
 };
-
-const ASPECTS: AspectRatio[] = ["1:1", "4:3", "3:4", "16:9", "9:16"];
-
-function asAspect(value?: string): AspectRatio | undefined {
-  return value && (ASPECTS as string[]).includes(value) ? (value as AspectRatio) : undefined;
-}
 
 function ActionButton({
   label,
@@ -49,7 +44,10 @@ function ActionButton({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
       title={label}
       aria-label={label}
       className="grid size-7 place-items-center rounded-md text-faint transition-colors hover:bg-canvas hover:text-ink"
@@ -59,20 +57,29 @@ function ActionButton({
   );
 }
 
+function DownloadAction({ url, name }: { url: string; name: string }) {
+  return (
+    <ActionButton
+      label="下载"
+      onClick={() => {
+        void downloadAsset(url, name);
+      }}
+    >
+      <Download className="size-3.5" strokeWidth={1.75} />
+    </ActionButton>
+  );
+}
+
 function ImageCard({
   block,
   onPreview,
   onAddToCanvas,
-  onGenerate,
 }: {
   block: ImageBlock;
   onPreview: Props["onPreview"];
   onAddToCanvas: Props["onAddToCanvas"];
-  onGenerate: Props["onGenerate"];
 }) {
-  const toast = useToast();
   const label = block.prompt || "生成图像";
-  const aspect = asAspect(block.aspectRatio);
 
   return (
     <figure className="overflow-hidden rounded-xl border border-line bg-surface">
@@ -114,60 +121,17 @@ function ImageCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          <ActionButton
-            label="放入画布"
-            onClick={() => onAddToCanvas(block)}
-          >
+          <ActionButton label="放入画布" onClick={() => onAddToCanvas(block)}>
             <Frame className="size-3.5" strokeWidth={1.75} />
           </ActionButton>
-          <ActionButton
-            label="再生成一版"
-            onClick={() =>
-              onGenerate({
-                kind: "image",
-                prompt: block.prompt ?? "再生成一版",
-                ...(aspect ? { aspectRatio: aspect } : {}),
-              })
-            }
-          >
-            <RotateCcw className="size-3.5" strokeWidth={1.75} />
-          </ActionButton>
-          <ActionButton
-            label="下载图片"
-            onClick={() => {
-              void downloadAsset(block.url, label).catch(() => toast("error", "下载失败"));
-            }}
-          >
-            <Download className="size-3.5" strokeWidth={1.75} />
-          </ActionButton>
-          {block.prompt && (
-            <ActionButton
-              label="复制提示词"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(block.prompt ?? "")
-                  .then(() => toast("success", "提示词已复制"))
-                  .catch(() => toast("error", "复制失败"));
-              }}
-            >
-              <Copy className="size-3.5" strokeWidth={1.75} />
-            </ActionButton>
-          )}
+          <DownloadAction url={block.url} name={label} />
         </div>
       </figcaption>
     </figure>
   );
 }
 
-function VideoCard({
-  block,
-  onGenerate,
-}: {
-  block: VideoBlock;
-  onGenerate: Props["onGenerate"];
-}) {
-  const toast = useToast();
-
+function VideoCard({ block }: { block: VideoBlock }) {
   return (
     <figure className="overflow-hidden rounded-xl border border-line bg-surface">
       <video
@@ -187,78 +151,201 @@ function VideoCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          <ActionButton
-            label="再生成一版"
-            onClick={() =>
-              onGenerate({
-                kind: "video",
-                prompt: block.prompt ?? "再生成一版",
-              })
-            }
-          >
-            <RotateCcw className="size-3.5" strokeWidth={1.75} />
-          </ActionButton>
-          <ActionButton
-            label="下载视频"
-            onClick={() => {
-              void downloadAsset(block.url, block.prompt || "生成视频");
-            }}
-          >
-            <Download className="size-3.5" strokeWidth={1.75} />
-          </ActionButton>
+          <DownloadAction url={block.url} name={block.prompt || "生成视频"} />
         </div>
       </figcaption>
     </figure>
   );
 }
 
+function CompactTile({
+  block,
+  onPreview,
+  onAddToCanvas,
+}: {
+  block: MediaBlock;
+  onPreview: Props["onPreview"];
+  onAddToCanvas: Props["onAddToCanvas"];
+}) {
+  const label = block.prompt || (block.type === "video" ? "生成视频" : "生成图像");
+  const preview = () =>
+    onPreview({
+      src: block.type === "video" ? (block.posterUrl ?? block.url) : block.url,
+      name: label,
+    });
+
+  return (
+    <div className="group relative w-[104px] shrink-0 overflow-hidden rounded-lg border border-line bg-canvas">
+      {block.type === "image" ? (
+        <button type="button" onClick={preview} className="block w-full">
+          <img
+            src={block.url}
+            alt={label}
+            loading="lazy"
+            draggable
+            onDragStart={(event) =>
+              setChatImageDragData(event, {
+                url: block.url,
+                title: label,
+                mimeType: block.mimeType,
+                width: block.width,
+                height: block.height,
+              })
+            }
+            className="aspect-[3/4] w-full cursor-grab object-cover active:cursor-grabbing"
+          />
+        </button>
+      ) : (
+        <button type="button" onClick={preview} className="relative block w-full">
+          <img
+            src={block.posterUrl}
+            alt={label}
+            loading="lazy"
+            className="aspect-[3/4] w-full object-cover"
+          />
+          <span className="absolute inset-0 grid place-items-center bg-ink/20">
+            <span className="grid size-7 place-items-center rounded-full bg-ink/60 text-white">
+              <Play className="size-3 fill-current" strokeWidth={0} />
+            </span>
+          </span>
+        </button>
+      )}
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end gap-0.5 bg-gradient-to-t from-ink/45 to-transparent p-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 max-sm:pointer-events-auto max-sm:opacity-100">
+        {block.type === "image" && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onAddToCanvas(block);
+            }}
+            aria-label="放入画布"
+            title="放入画布"
+            className="grid size-6 place-items-center rounded-md bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+          >
+            <Frame className="size-3" strokeWidth={1.75} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void downloadAsset(block.url, label);
+          }}
+          aria-label="下载"
+          title="下载"
+          className="grid size-6 place-items-center rounded-md bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+        >
+          <Download className="size-3" strokeWidth={1.75} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactRow({
+  items,
+  onPreview,
+  onAddToCanvas,
+}: {
+  items: MediaBlock[];
+  onPreview: Props["onPreview"];
+  onAddToCanvas: Props["onAddToCanvas"];
+}) {
+  if (items.length === 1) {
+    const block = items[0]!;
+    return block.type === "image" ? (
+      <ImageCard block={block} onPreview={onPreview} onAddToCanvas={onAddToCanvas} />
+    ) : (
+      <VideoCard block={block} />
+    );
+  }
+
+  return (
+    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {items.map((block) => (
+        <CompactTile
+          key={block.id}
+          block={block}
+          onPreview={onPreview}
+          onAddToCanvas={onAddToCanvas}
+        />
+      ))}
+    </div>
+  );
+}
+
 function InspirationCard({
   block,
   onPreview,
+  onAddReference,
 }: {
   block: InspirationBlock;
   onPreview: Props["onPreview"];
+  onAddReference: Props["onAddReference"];
 }) {
+  const toast = useToast();
+
   return (
     <section className="rounded-xl border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
-        <Search className="size-3.5 text-faint" strokeWidth={1.75} />
+        <ImagePlus className="size-3.5 text-faint" strokeWidth={1.75} />
         <span className="font-mono text-[9px] tracking-[0.16em] text-faint">灵感参考</span>
         <span className="ml-auto text-[10px] text-faint">{block.items.length} 条</span>
       </div>
       <p className="mt-1.5 text-[12px] text-muted">{block.query}</p>
 
       <div className="mt-2.5 grid grid-cols-2 gap-2">
-        {block.items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onPreview({ src: item.imageUrl, name: item.title })}
-            aria-label={`查看 ${item.title}`}
-            className="group overflow-hidden rounded-lg border border-line bg-canvas text-left"
-          >
-            <img
-              src={item.imageUrl}
-              alt={item.title}
-              loading="lazy"
-              draggable
-              onDragStart={(event) =>
-                setChatImageDragData(event, {
-                  url: item.imageUrl,
-                  title: item.title,
-                  mimeType: guessMimeTypeFromUrl(item.imageUrl),
-                  width: item.width,
-                  height: item.height,
-                })
-              }
-              className="aspect-[4/3] w-full cursor-grab object-cover transition-opacity group-hover:opacity-90 active:cursor-grabbing"
-            />
-            <div className="px-2 py-1.5">
-              <p className="truncate text-[11.5px] text-ink">{item.title}</p>
-              <p className="truncate text-[10px] text-faint">{item.source}</p>
+        {block.items.map((item) => {
+          const mimeType = guessMimeTypeFromUrl(item.imageUrl);
+          return (
+            <div
+              key={item.id}
+              className="group relative overflow-hidden rounded-lg border border-line bg-canvas"
+            >
+              <button
+                type="button"
+                onClick={() => onPreview({ src: item.imageUrl, name: item.title })}
+                aria-label={`查看 ${item.title}`}
+                className="block w-full text-left"
+              >
+                <img
+                  src={item.imageUrl}
+                  alt={item.title}
+                  loading="lazy"
+                  draggable
+                  onDragStart={(event) =>
+                    setChatImageDragData(event, {
+                      url: item.imageUrl,
+                      title: item.title,
+                      mimeType,
+                      width: item.width,
+                      height: item.height,
+                    })
+                  }
+                  className="aspect-[4/3] w-full cursor-grab object-cover transition-opacity group-hover:opacity-90 active:cursor-grabbing"
+                />
+                <div className="px-2 py-1.5">
+                  <p className="truncate text-[11.5px] text-ink">{item.title}</p>
+                  <p className="truncate text-[10px] text-faint">{item.source}</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onAddReference({ url: item.imageUrl, name: item.title, mimeType });
+                  toast("success", "已加入对话框");
+                }}
+                aria-label={`把 ${item.title} 加入对话`}
+                title="加入对话"
+                className="absolute left-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-ink/70 text-white opacity-0 transition-all hover:bg-ink group-hover:opacity-100 max-sm:opacity-100"
+              >
+                <ArrowDownRight className="size-3.5" strokeWidth={2} />
+              </button>
             </div>
-          </button>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -272,33 +359,64 @@ function TextBlockView({ text }: { text: string }) {
   );
 }
 
-export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onGenerate }: Props) {
+export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onAddReference }: Props) {
+  type Unit =
+    | { key: string; kind: "text"; block: TextBlock }
+    | { key: string; kind: "inspiration"; block: InspirationBlock }
+    | { key: string; kind: "media"; items: MediaBlock[] };
+
+  const units: Unit[] = [];
+  const mediaByBatch = new Map<string, number>();
+
+  for (const block of blocks) {
+    if (block.type === "tool") continue;
+
+    if (block.type === "text") {
+      units.push({ key: `text-${block.text.slice(0, 12)}`, kind: "text", block });
+      continue;
+    }
+
+    if (block.type === "inspiration") {
+      units.push({ key: `insp-${block.id}`, kind: "inspiration", block });
+      continue;
+    }
+
+    const batch = block.batchId ?? block.id;
+    const existing = mediaByBatch.get(batch);
+    if (existing !== undefined) {
+      const unit = units[existing];
+      if (unit?.kind === "media") unit.items.push(block);
+      continue;
+    }
+
+    mediaByBatch.set(batch, units.length);
+    units.push({ key: `media-${batch}`, kind: "media", items: [block] });
+  }
+
   return (
     <div className="space-y-3">
-      {blocks.map((block, index) => {
-        const key = `${block.type}-${index}`;
-
-        switch (block.type) {
-          case "text":
-            return <TextBlockView key={key} text={block.text} />;
-          case "tool":
-            // 工具行由 RunProcess 统一渲染，这里不再平铺
-            return null;
-          case "image":
-            return (
-              <ImageCard
-                key={key}
-                block={block}
-                onPreview={onPreview}
-                onAddToCanvas={onAddToCanvas}
-                onGenerate={onGenerate}
-              />
-            );
-          case "video":
-            return <VideoCard key={key} block={block} onGenerate={onGenerate} />;
-          case "inspiration":
-            return <InspirationCard key={key} block={block} onPreview={onPreview} />;
+      {units.map((unit) => {
+        if (unit.kind === "text") {
+          return <TextBlockView key={unit.key} text={unit.block.text} />;
         }
+        if (unit.kind === "inspiration") {
+          return (
+            <InspirationCard
+              key={unit.key}
+              block={unit.block}
+              onPreview={onPreview}
+              onAddReference={onAddReference}
+            />
+          );
+        }
+        return (
+          <ArtifactRow
+            key={unit.key}
+            items={unit.items}
+            onPreview={onPreview}
+            onAddToCanvas={onAddToCanvas}
+          />
+        );
       })}
     </div>
   );

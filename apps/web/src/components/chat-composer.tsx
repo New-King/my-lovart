@@ -20,6 +20,7 @@ import { AttachmentBar } from "./chat-attachments";
 export type ChatComposerHandle = {
   openFilePicker: () => void;
   addMaterial: (material: LibraryMaterial) => void;
+  addReference: (item: { url: string; name: string; mimeType: string }) => void;
 };
 
 type Props = {
@@ -136,6 +137,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(function ChatC
           name: material.name,
           mimeType: material.mimeType,
         });
+      },
+      addReference(item) {
+        addReference(item);
       },
     }),
     [addReference],

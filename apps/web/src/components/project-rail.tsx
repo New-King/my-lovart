@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, X } from "lucide-react";
+import { PanelLeftClose, Plus, X } from "lucide-react";
 import type { Project } from "@/lib/api";
 
 function relativeTime(iso: string) {
@@ -20,6 +20,7 @@ type Props = {
   onCreate: () => void;
   onLogout: () => void;
   onClose?: () => void;
+  onCollapse?: () => void;
 };
 
 export function ProjectRail({
@@ -29,6 +30,7 @@ export function ProjectRail({
   onCreate,
   onLogout,
   onClose,
+  onCollapse,
 }: Props) {
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-line bg-canvas">
@@ -37,6 +39,17 @@ export function ProjectRail({
           m
         </span>
         <span className="text-[13px] font-medium tracking-tight">mylovart</span>
+        {!onClose && onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="隐藏项目栏"
+            title="隐藏项目栏"
+            className="ml-auto grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink"
+          >
+            <PanelLeftClose className="size-4" strokeWidth={1.75} />
+          </button>
+        )}
         {onClose && (
           <button
             type="button"

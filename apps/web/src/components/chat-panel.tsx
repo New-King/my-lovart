@@ -2,7 +2,6 @@
 
 import type {
   AspectRatio,
-  GenerateRequest,
   ImageBlock,
   ToolBlock,
 } from "@my-lovart/shared";
@@ -16,7 +15,6 @@ import {
   type ChatMessage,
   type Project,
 } from "@/lib/api";
-import { guessMimeTypeFromUrl } from "@/lib/chat-canvas-drag";
 import type { ReferenceItem } from "@/lib/chat-references";
 import { MessageAttachments } from "./chat-attachments";
 import { ChatBlocks } from "./chat-blocks";
@@ -41,7 +39,6 @@ type Props = {
     aspectRatio: AspectRatio,
   ) => Promise<boolean>;
   onStop: () => void;
-  onGenerate: (input: GenerateRequest) => void;
   onRetry: () => void;
   onAddToCanvas: (block: ImageBlock) => void;
   onOpenMaterials: () => void;
@@ -97,7 +94,6 @@ export function ChatPanel({
   onCreate,
   onSend,
   onStop,
-  onGenerate,
   onRetry,
   onAddToCanvas,
   onOpenMaterials,
@@ -182,17 +178,6 @@ export function ChatPanel({
             width: block.width,
             height: block.height,
           });
-        } else if (block.type === "inspiration") {
-          for (const item of block.items) {
-            push({
-              id: item.id,
-              name: item.title,
-              url: item.imageUrl,
-              mimeType: guessMimeTypeFromUrl(item.imageUrl),
-              width: item.width,
-              height: item.height,
-            });
-          }
         }
       }
     }
@@ -201,14 +186,6 @@ export function ChatPanel({
   }, [messages]);
 
   const agentLabel = agent === "mock" ? "mock-agent" : agent === "llm" ? "deepseek-flash" : "agent";
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  const canRegenerate = Boolean(
-    lastAssistant &&
-      (lastAssistant.status === "failed" ||
-        lastAssistant.blocks?.some(
-          (block) => block.type === "image" || block.type === "video",
-        )),
-  );
 
   return (
     <section className="flex w-full shrink-0 flex-col bg-canvas lg:w-[380px] lg:border-l lg:border-line">
@@ -334,7 +311,7 @@ export function ChatPanel({
                         blocks={message.blocks}
                         onPreview={setPreview}
                         onAddToCanvas={onAddToCanvas}
-                        onGenerate={onGenerate}
+                        onAddReference={(item) => composerRef.current?.addReference(item)}
                       />
                     )}
 
@@ -368,17 +345,6 @@ export function ChatPanel({
 
                     <div className="flex items-center gap-1">
                       {message.content && <CopyButton text={message.content} />}
-                      {message.id === lastAssistant?.id && !sending && canRegenerate && (
-                        <button
-                          type="button"
-                          onClick={onRetry}
-                          title="按上一次的请求重新生成"
-                          aria-label="重新生成"
-                          className="grid size-6 place-items-center rounded-md text-faint opacity-60 transition-all hover:bg-surface hover:text-ink focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                        >
-                          <RotateCcw className="size-3" strokeWidth={1.75} />
-                        </button>
-                      )}
                     </div>
                   </div>
                 ),

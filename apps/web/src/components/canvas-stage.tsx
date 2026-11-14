@@ -4,13 +4,15 @@ import dynamic from "next/dynamic";
 import {
   BookOpen,
   Download,
+  LocateFixed,
   Loader2,
   Menu,
   MessageSquare,
+  PanelLeftOpen,
   Share2,
 } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
-import { getSceneVersion, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
+import { getSceneVersion, viewportCoordsToSceneCoords, getCommonBounds, sceneCoordsToViewportCoords } from "@excalidraw/excalidraw";
 import type {
   BinaryFileData,
   ExcalidrawImperativeAPI,
@@ -26,6 +28,7 @@ import {
   type ChatImageDragPayload,
 } from "@/lib/chat-canvas-drag";
 import type { Project } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useToast } from "./ui/toast";
 
 const Excalidraw = dynamic(() => import("@excalidraw/excalidraw").then((m) => m.Excalidraw), {
@@ -38,6 +41,7 @@ type Props = {
   elements: unknown[];
   files: Record<string, unknown>;
   loaded: boolean;
+  railCollapsed: boolean;
   onSave: (elements: unknown[], files: Record<string, unknown>) => Promise<void>;
   onOpenProjects: () => void;
   onShowChat: () => void;
@@ -70,6 +74,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     elements,
     files,
     loaded,
+    railCollapsed,
     onSave,
     onOpenProjects,
     onShowChat,
@@ -80,6 +85,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(0);
+  const [showReturn, setShowReturn] = useState(false);
   const showToast = useToast();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragDepth = useRef(0);
@@ -96,6 +102,32 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     };
   }, []);
 
+  const updateVisibility = useCallback((api: ExcalidrawImperativeAPI) => {
+    const scene = api.getSceneElements();
+    if (scene.length === 0) {
+      setShowReturn(false);
+      return;
+    }
+
+    const appState = api.getAppState();
+    const [x1, y1, x2, y2] = getCommonBounds(scene);
+    const topLeft = sceneCoordsToViewportCoords({ sceneX: x1, sceneY: y1 }, appState);
+    const bottomRight = sceneCoordsToViewportCoords({ sceneX: x2, sceneY: y2 }, appState);
+    const visible =
+      bottomRight.x > 0 &&
+      topLeft.x < appState.width &&
+      bottomRight.y > 0 &&
+      topLeft.y < appState.height;
+    setShowReturn(!visible);
+  }, []);
+
+  const fitContent = useCallback(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    api.scrollToContent(api.getSceneElements(), { fitToContent: true });
+    setShowReturn(false);
+  }, []);
+
   const handleApi = useCallback(
     (api: ExcalidrawImperativeAPI) => {
       if (!alive.current) return;
@@ -105,6 +137,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
 
       if (elements.length === 0) {
         hydrated.current = true;
+        setShowReturn(false);
         return;
       }
 
@@ -119,9 +152,10 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
         api.updateScene({ elements: elements as never[] });
         api.scrollToContent(elements as never[], { fitToContent: true });
         hydrated.current = true;
+        updateVisibility(api);
       }, 100);
     },
-    [elements, files],
+    [elements, files, updateVisibility],
   );
 
   const addChatImage = useCallback(
@@ -309,9 +343,16 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             type="button"
             onClick={onOpenProjects}
             aria-label="打开项目"
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink lg:hidden"
+            className={cn(
+              "grid size-8 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-ink",
+              !railCollapsed && "lg:hidden",
+            )}
           >
-            <Menu className="size-4" strokeWidth={1.75} />
+            {railCollapsed ? (
+              <PanelLeftOpen className="size-4" strokeWidth={1.75} />
+            ) : (
+              <Menu className="size-4" strokeWidth={1.75} />
+            )}
           </button>
           <h1 className="min-w-0 truncate text-[13px] font-medium tracking-tight">
             {project?.name ?? "未选择项目"}
@@ -380,6 +421,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             excalidrawAPI={handleApi}
             onChange={(next, _appState, nextFiles) => {
               if (!alive.current || !hydrated.current) return;
+              if (apiRef.current) updateVisibility(apiRef.current);
 
               const filesSignature = Object.values(nextFiles)
                 .map((file) => `${file.id}:${file.dataURL.length}`)
@@ -414,6 +456,17 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
               松开把图片放到画布
             </span>
           </div>
+        )}
+
+        {showReturn && (
+          <button
+            type="button"
+            onClick={fitContent}
+            className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 py-1.5 text-[11px] text-ink shadow-[0_10px_30px_-14px_rgba(24,24,27,0.4)] transition-colors hover:bg-canvas"
+          >
+            <LocateFixed className="size-3.5 text-muted" strokeWidth={1.75} />
+            回到内容
+          </button>
         )}
 
         {(busy > 0) && (
