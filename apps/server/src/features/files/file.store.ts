@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ChatAttachment } from "@my-lovart/shared";
+import { downloadStoredFile, uploadStoredFile } from "./storage.js";
 
 type StoredFile = {
   id: string;
@@ -42,10 +43,10 @@ function asNumber(value: unknown): number | undefined {
  * - data URL 写入文件仓库，返回绝对地址
  * - 已经是地址（/mock/*.svg、http(s)）的原样保留
  */
-export function normalizeAttachment(
+export async function normalizeAttachment(
   input: RawAttachment,
   baseUrl: string,
-): ChatAttachment | null {
+): Promise<ChatAttachment | null> {
   const url = typeof input.url === "string" ? input.url : "";
   if (!url) return null;
 
@@ -77,6 +78,7 @@ export function normalizeAttachment(
 
   const id = randomUUID();
   files.set(id, { id, name, mimeType, data });
+  await uploadStoredFile(`attachments/${id}`, data, mimeType);
 
   return {
     id,
@@ -89,8 +91,20 @@ export function normalizeAttachment(
   };
 }
 
-export function getFile(id: string): StoredFile | undefined {
-  return files.get(id);
+export async function getFile(id: string): Promise<StoredFile | undefined> {
+  const cached = files.get(id);
+  if (cached) return cached;
+
+  const downloaded = await downloadStoredFile(`attachments/${id}`);
+  if (!downloaded) return undefined;
+  const stored: StoredFile = {
+    id,
+    name: "file",
+    mimeType: downloaded.mimeType,
+    data: downloaded.data,
+  };
+  files.set(id, stored);
+  return stored;
 }
 
 const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
@@ -113,6 +127,7 @@ export async function importRemoteFile(
     options.fallbackMimeType;
   const id = randomUUID();
   files.set(id, { id, name: options.name, mimeType, data });
+  await uploadStoredFile(`attachments/${id}`, data, mimeType);
 
   return {
     url: `${baseUrl}${FILE_ROUTE_PREFIX}${id}`,
@@ -122,13 +137,13 @@ export async function importRemoteFile(
 }
 
 /** 供应商要求可公网访问的图片；本地附件转成 data URL 再送过去 */
-export function fileDataUrlFromUrl(url: string): string | undefined {
+export async function fileDataUrlFromUrl(url: string): Promise<string | undefined> {
   if (!url.startsWith("data:")) {
     const index = url.indexOf(FILE_ROUTE_PREFIX);
     if (index < 0) return undefined;
     const id = url.slice(index + FILE_ROUTE_PREFIX.length).split(/[?#]/)[0];
     if (!id) return undefined;
-    const file = files.get(id);
+    const file = await getFile(id);
     if (!file) return undefined;
     return `data:${file.mimeType};base64,${file.data.toString("base64")}`;
   }

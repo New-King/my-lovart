@@ -64,12 +64,15 @@ export function normalizeAspect(input: unknown): AspectRatio | undefined {
  * 客户端传来的附件可能是 data URL、mock 资源或远端地址。
  * 一律先落成稳定地址，再写进消息；无效附件直接丢弃。
  */
-export function normalizeAttachments(raw: unknown, baseUrl: string): ChatAttachment[] {
+export async function normalizeAttachments(
+  raw: unknown,
+  baseUrl: string,
+): Promise<ChatAttachment[]> {
   if (!Array.isArray(raw)) return [];
   const result: ChatAttachment[] = [];
   for (const item of raw.slice(0, 8)) {
     if (typeof item !== "object" || item === null) continue;
-    const attachment = normalizeAttachment(item as Record<string, unknown>, baseUrl);
+    const attachment = await normalizeAttachment(item as Record<string, unknown>, baseUrl);
     if (attachment) result.push(attachment);
   }
   return result;

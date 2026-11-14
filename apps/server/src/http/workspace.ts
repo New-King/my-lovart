@@ -126,7 +126,7 @@ export function registerWorkspaceRoutes(
         return reply.code(400).send({ error: "消息过长" });
       }
 
-      const attachments = normalizeAttachments(body.attachments, baseUrlFor(request));
+      const attachments = await normalizeAttachments(body.attachments, baseUrlFor(request));
       if (!text && attachments.length === 0) {
         return reply.code(400).send({ error: "消息不能为空" });
       }
@@ -193,7 +193,7 @@ export function registerWorkspaceRoutes(
       const kind = body.kind === "video" ? "video" : "image";
       const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
       const aspectRatio = normalizeAspect(body.aspectRatio);
-      const attachments = normalizeAttachments(body.attachments, baseUrlFor(request));
+      const attachments = await normalizeAttachments(body.attachments, baseUrlFor(request));
 
       const stream = openEventStream(request, reply);
       const controller = new AbortController();

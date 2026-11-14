@@ -40,22 +40,24 @@ const TYPE_LABELS: Record<string, string> = {
   frame: "画框",
 };
 
-export function buildAttachmentContext(attachments: ChatAttachment[]): AgentAttachmentContext {
+export async function buildAttachmentContext(
+  attachments: ChatAttachment[],
+): Promise<AgentAttachmentContext> {
   const map: Record<string, string> = {};
   const lines: string[] = [];
 
-  attachments.forEach((attachment, index) => {
-    if (!attachment.mimeType.startsWith("image/")) return;
+  for (const [index, attachment] of attachments.entries()) {
+    if (!attachment.mimeType.startsWith("image/")) continue;
 
-    const assetId = `asset-${index + 1}`;
-    const resolved = resolveReference(attachment.url);
-    if (!resolved) return;
+    const assetId = `asset-${attachment.id}`;
+    const resolved = await resolveReference(attachment.url);
+    if (!resolved) continue;
 
     map[assetId] = resolved;
     lines.push(
       `  <image index="${index + 1}" asset_id="${assetId}" mime_type="${escapeXml(attachment.mimeType)}" name="${escapeXml(attachment.name)}" />`,
     );
-  });
+  }
 
   return {
     map,
@@ -66,10 +68,10 @@ export function buildAttachmentContext(attachments: ChatAttachment[]): AgentAtta
   };
 }
 
-function resolveReference(url: string): string | undefined {
+async function resolveReference(url: string): Promise<string | undefined> {
   if (url.startsWith("http://") || url.startsWith("https://")) {
     // 本地 /files 地址要转成 data URL，供应商访问不到 127.0.0.1
-    return fileDataUrlFromUrl(url) ?? url;
+    return (await fileDataUrlFromUrl(url)) ?? url;
   }
   return fileDataUrlFromUrl(url);
 }

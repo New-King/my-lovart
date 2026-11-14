@@ -9,6 +9,7 @@ import type {
 } from "@my-lovart/shared";
 import { getDb } from "../../db/supabase.js";
 import { env } from "../../lib/env.js";
+import { hydrateCanvasFiles, persistCanvasFiles } from "./canvas-file-store.js";
 import type { Workspace } from "./workspace.store.js";
 
 export type WorkspaceSnapshot = Pick<Workspace, "elements" | "files" | "messages">;
@@ -145,10 +146,11 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
 
       return {
         elements: Array.isArray(canvas.elements) ? (canvas.elements as unknown[]) : [],
-        files:
+        files: await hydrateCanvasFiles(
           typeof canvas.files === "object" && canvas.files !== null && !Array.isArray(canvas.files)
             ? (canvas.files as Record<string, unknown>)
             : {},
+        ),
         messages: ((data ?? []) as MessageRow[])
           .map(toMessage)
           .filter((message): message is ChatMessage => message !== null),
@@ -157,9 +159,16 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
 
     async saveCanvas(projectId, elements, files) {
       const canvas = await ensureCanvas(projectId);
+      const manifest = await persistCanvasFiles(
+        projectId,
+        files,
+        typeof canvas.files === "object" && canvas.files !== null && !Array.isArray(canvas.files)
+          ? (canvas.files as Record<string, unknown>)
+          : {},
+      );
       const { error } = await db()
         .from("canvases")
-        .update({ elements, files, updated_at: new Date().toISOString() })
+        .update({ elements, files: manifest, updated_at: new Date().toISOString() })
         .eq("id", canvas.id);
       if (error) throw error;
     },

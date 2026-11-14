@@ -9,7 +9,7 @@ type Params = { id: string };
  */
 export function registerFileRoutes(app: FastifyInstance) {
   app.get<{ Params: Params }>("/files/:id", async (request, reply) => {
-    const file = getFile(request.params.id);
+    const file = await getFile(request.params.id);
     if (!file) return reply.code(404).send({ error: "文件不存在" });
 
     reply

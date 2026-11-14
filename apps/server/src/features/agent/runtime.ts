@@ -65,7 +65,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   }
 
   const bus = new AgentEventBus();
-  const attachmentContext = buildAttachmentContext(input.attachments);
+  const attachmentContext = await buildAttachmentContext(input.attachments);
   const canvasContext = buildCanvasContext(input.canvasElements, input.canvasFiles);
   const tools = createAgentTools({
     bus,
