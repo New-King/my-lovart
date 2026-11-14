@@ -221,6 +221,12 @@ function loadImageSize(dataURL: string): Promise<{ width: number; height: number
   });
 }
 
+export function loadImageDataUrlSize(
+  dataURL: string,
+): Promise<{ width: number; height: number }> {
+  return loadImageSize(dataURL);
+}
+
 async function insertImageData(
   api: ExcalidrawImperativeAPI,
   input: ImageDataInput,

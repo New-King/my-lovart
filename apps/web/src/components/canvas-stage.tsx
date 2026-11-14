@@ -25,6 +25,7 @@ import {
   arrangeCanvasImages,
   insertImageFileIntoCanvas,
   insertImageIntoCanvas,
+  loadImageDataUrlSize,
   type CanvasImagePlacement,
 } from "@/lib/canvas-image";
 import {
@@ -106,8 +107,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   /** 框选矩形（场景坐标），pointerup 后用来做「相交即选中」 */
   const selectionBox = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const preSelection = useRef<Record<string, true>>({});
-  /** 原生图片工具选完文件后会进入待落位状态，这里直接接管 */
-  const placingPending = useRef(false);
+  /** 原生图片工具选完文件后，等文件可用就自动落位；避免半成品被自动保存 */
+  const pendingImageJob = useRef<string | null>(null);
 
   const installSelectionGuards = useCallback((api: ExcalidrawImperativeAPI) => {
     api.onPointerDown((tool) => {
@@ -148,6 +149,89 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     return () => {
       alive.current = false;
       if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  // Excalidraw 自带的图片工具在鼠标操作下会进入「点一下画布再落位」状态，
+  // 且元素初始宽高是 0，直接按宽高插会变成 1×1。这里等文件真正可读后，
+  // 用图片原始尺寸等比缩到 400×500 以内，直接放到视口中心。
+  useEffect(() => {
+    let cancelled = false;
+
+    async function placePending(api: ExcalidrawImperativeAPI, id: string, dataURL: string) {
+      try {
+        const size = await loadImageDataUrlSize(dataURL);
+        if (cancelled || apiRef.current !== api) return;
+
+        const appState = api.getAppState();
+        if (appState.pendingImageElementId !== id) return;
+
+        const scene = api.getSceneElements();
+        const pending = scene.find((element) => element.id === id);
+        if (!pending) return;
+
+        const scale = Math.min(1, 400 / size.width, 500 / size.height);
+        const width = Math.max(1, Math.round(size.width * scale));
+        const height = Math.max(1, Math.round(size.height * scale));
+        const center = viewportCoordsToSceneCoords(
+          {
+            clientX: appState.offsetLeft + appState.width / 2,
+            clientY: appState.offsetTop + appState.height / 2,
+          },
+          appState,
+        );
+
+        api.updateScene({
+          elements: scene.map((element) =>
+            element.id === id
+              ? {
+                  ...element,
+                  x: center.x - width / 2,
+                  y: center.y - height / 2,
+                  width,
+                  height,
+                  status: "saved" as const,
+                  version: element.version + 1,
+                  versionNonce: Math.floor(Math.random() * 2_000_000_000),
+                  updated: Date.now(),
+                }
+              : element,
+          ),
+          appState: { pendingImageElementId: null },
+          captureUpdate: "IMMEDIATELY",
+        });
+        api.setActiveTool({ type: "selection" });
+      } catch (err) {
+        console.error("[canvas] 原生图片落位失败", err);
+        pendingImageJob.current = null;
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      const api = apiRef.current;
+      if (!api || !hydrated.current) return;
+
+      const id = api.getAppState().pendingImageElementId;
+      if (!id) {
+        pendingImageJob.current = null;
+        return;
+      }
+      if (pendingImageJob.current === id) return;
+
+      const pending = api.getSceneElements().find((element) => element.id === id);
+      const fileId = (pending as { fileId?: unknown } | undefined)?.fileId;
+      if (typeof fileId !== "string") return;
+
+      const file = api.getFiles()[fileId];
+      if (!file?.dataURL) return;
+
+      pendingImageJob.current = id;
+      void placePending(api, id, file.dataURL);
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -529,50 +613,9 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
                 };
               }
 
-              // 原生图片工具：选完文件后不要再让用户点一下，直接放到视口中心
-              if (appState.pendingImageElementId && !placingPending.current) {
-                const pendingId = appState.pendingImageElementId;
-                const pending = next.find((element) => element.id === pendingId);
-                if (pending) {
-                  placingPending.current = true;
-                  const center = viewportCoordsToSceneCoords(
-                    {
-                      clientX: appState.offsetLeft + appState.width / 2,
-                      clientY: appState.offsetTop + appState.height / 2,
-                    },
-                    appState,
-                  );
-                  const scale = Math.min(1, 400 / pending.width, 500 / pending.height);
-                  const width = Math.max(1, Math.round(pending.width * scale));
-                  const height = Math.max(1, Math.round(pending.height * scale));
-                  api.updateScene({
-                    elements: next.map((element) =>
-                      element.id === pendingId
-                        ? {
-                            ...element,
-                            x: center.x - width / 2,
-                            y: center.y - height / 2,
-                            width,
-                            height,
-                            status: "saved" as const,
-                            version: element.version + 1,
-                            versionNonce: Math.floor(Math.random() * 2_000_000_000),
-                            updated: Date.now(),
-                          }
-                        : element,
-                    ),
-                    appState: {
-                      pendingImageElementId: null,
-                    },
-                    captureUpdate: "IMMEDIATELY",
-                  });
-                  api.setActiveTool({ type: "selection" });
-                  window.setTimeout(() => {
-                    placingPending.current = false;
-                  }, 60);
-                  return;
-                }
-              }
+              // 原生图片工具选完文件后会在 pending 状态等落位；此时元素宽高还是 0，
+// 先不要保存半成品，交给上面的自动落位流程处理。
+              if (appState.pendingImageElementId) return;
 
               updateVisibility(api);
 
