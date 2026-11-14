@@ -3,6 +3,7 @@ import type {
   ChatAttachment,
   ChatBlock,
   ChatMessage,
+  MessagePart,
   RunError,
   RunStep,
   RunStepStatus,
@@ -82,6 +83,7 @@ export function startAssistantMessage(
     status: "queued",
     steps: [],
     blocks: [],
+    parts: [],
   };
   ws.messages.push(message);
   return message;
@@ -123,7 +125,19 @@ export function appendDelta(
   const message = findMessage(projectId, messageId);
   if (!message || !delta) return;
   message.content += delta;
+
+  if (!message.parts) message.parts = [];
+  appendTextPart(message.parts, delta);
   touch(message, at);
+}
+
+function appendTextPart(parts: MessagePart[], delta: string): void {
+  const last = parts[parts.length - 1];
+  if (last?.type === "text") {
+    last.text += delta;
+    return;
+  }
+  parts.push({ type: "text", text: delta });
 }
 
 export function setMessageOptions(
@@ -209,6 +223,12 @@ export function appendBlock(
   if (!message) return;
   if (!message.blocks) message.blocks = [];
   message.blocks.push(block);
+
+  // 工具卡片走运行过程时间线，不混进正文与产物的交错序列
+  if (block.type !== "tool") {
+    if (!message.parts) message.parts = [];
+    message.parts.push({ type: "block", block });
+  }
   touch(message, at);
 }
 

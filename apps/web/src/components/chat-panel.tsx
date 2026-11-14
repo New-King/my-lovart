@@ -2,7 +2,9 @@
 
 import type {
   AspectRatio,
+  ChatBlock,
   ImageBlock,
+  MessagePart,
   ToolBlock,
 } from "@my-lovart/shared";
 import { ArrowDown, Copy, Frame, Menu, RotateCcw } from "lucide-react";
@@ -84,6 +86,58 @@ function ActiveMediaSkeleton({ message }: { message: ChatMessage }) {
       {...(tool.aspectRatio ? { aspectRatio: tool.aspectRatio } : {})}
     />
   );
+}
+
+type PartUnit =
+  | { kind: "text"; key: string; text: string; cursor: boolean }
+  | { kind: "blocks"; key: string; blocks: ChatBlock[] };
+
+/** 文字和产物按到达顺序排；相邻且同批次的媒体合成一行 */
+function groupMessageParts(parts: MessagePart[], streaming: boolean): PartUnit[] {
+  const units: PartUnit[] = [];
+  const pushText = (text: string) => {
+    const last = units[units.length - 1];
+    if (last?.kind === "text") {
+      last.text += text;
+      return;
+    }
+    units.push({ kind: "text", key: `text-${units.length}`, text, cursor: false });
+  };
+
+  for (const part of parts) {
+    if (part.type === "text") {
+      pushText(part.text);
+      continue;
+    }
+
+    const block = part.block;
+    if (block.type === "tool") continue;
+
+    const last = units[units.length - 1];
+    const batch = "batchId" in block ? block.batchId : undefined;
+    const lastBlock =
+      last?.kind === "blocks" ? last.blocks[last.blocks.length - 1] : undefined;
+    const lastBatch =
+      lastBlock && "batchId" in lastBlock ? lastBlock.batchId : undefined;
+
+    if (
+      last?.kind === "blocks" &&
+      batch &&
+      lastBatch === batch &&
+      (block.type === "image" || block.type === "video")
+    ) {
+      last.blocks.push(block);
+    } else {
+      units.push({ kind: "blocks", key: `blocks-${units.length}`, blocks: [block] });
+    }
+  }
+
+  if (streaming) {
+    const last = units[units.length - 1];
+    if (last?.kind === "text") last.cursor = true;
+  }
+
+  return units;
 }
 
 export function ChatPanel({
@@ -299,25 +353,62 @@ export function ChatPanel({
                   <div key={message.id} className="group space-y-2">
                     <RunProcess message={message} />
 
-                    {message.content && (
-                      <div className="prose-muse text-[13.5px] leading-[1.7] text-ink">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                        {message.status === "streaming" && (
-                          <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-ink/40 align-middle" />
+                    {message.parts && message.parts.length > 0 ? (
+                      <div className="space-y-3">
+                        {groupMessageParts(
+                          message.parts,
+                          message.status === "streaming",
+                        ).map((unit) =>
+                          unit.kind === "text" ? (
+                            <div
+                              key={unit.key}
+                              className="prose-muse text-[13.5px] leading-[1.7] text-ink"
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {unit.text}
+                              </ReactMarkdown>
+                              {unit.cursor && (
+                                <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-ink/40 align-middle" />
+                              )}
+                            </div>
+                          ) : (
+                            <ChatBlocks
+                              key={unit.key}
+                              blocks={unit.blocks}
+                              onPreview={setPreview}
+                              onAddToCanvas={onAddToCanvas}
+                              onAddReference={(item) =>
+                                composerRef.current?.addReference(item)
+                              }
+                            />
+                          ),
                         )}
                       </div>
+                    ) : (
+                      <>
+                        {message.content && (
+                          <div className="prose-muse text-[13.5px] leading-[1.7] text-ink">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                            {message.status === "streaming" && (
+                              <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-ink/40 align-middle" />
+                            )}
+                          </div>
+                        )}
+
+                        {message.blocks && message.blocks.length > 0 && (
+                          <ChatBlocks
+                            blocks={message.blocks}
+                            onPreview={setPreview}
+                            onAddToCanvas={onAddToCanvas}
+                            onAddReference={(item) => composerRef.current?.addReference(item)}
+                          />
+                        )}
+                      </>
                     )}
 
                     <ActiveMediaSkeleton message={message} />
-
-                    {message.blocks && message.blocks.length > 0 && (
-                      <ChatBlocks
-                        blocks={message.blocks}
-                        onPreview={setPreview}
-                        onAddToCanvas={onAddToCanvas}
-                        onAddReference={(item) => composerRef.current?.addReference(item)}
-                      />
-                    )}
 
                     {message.options &&
                       message.options.length > 0 &&
