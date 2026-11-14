@@ -2,7 +2,8 @@ type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 const baseUrl = () => process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1";
 const apiKey = () => process.env.OPENAI_API_KEY ?? "";
-const modelName = () => process.env.OPENAI_MODEL ?? "deepseek-flash";
+const modelName = () =>
+  process.env.LOOMIC_AGENT_MODEL ?? process.env.OPENAI_MODEL ?? "deepseek-chat";
 
 export class LlmError extends Error {}
 
