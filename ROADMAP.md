@@ -61,6 +61,7 @@
 - [ ] 接 LangGraph PostgresSaver checkpointer + thread_id
 - [ ] 历史裁剪与视觉附件预算（压缩、最多张数）
 - [x] workspace 路由校验 project 归属
+- [x] 持久化验收脚本 `pnpm --filter @my-lovart/server verify:persistence`
 
 验收：重启服务后，同一 project 的消息、画布、图片、参考图全部还在；同一个 thread 能继续上下文。
 
