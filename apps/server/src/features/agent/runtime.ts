@@ -101,7 +101,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     ...input.history.map((message) =>
       message.role === "assistant" ? new AIMessage(message.content) : new HumanMessage(message.content),
     ),
-    new HumanMessage(userText),
+    buildHumanMessage(userText, attachmentContext.map),
   ];
 
   let activeTool: { toolCallId: string } | null = null;
@@ -377,12 +377,45 @@ function buildUserText(
     blocks.push(`<canvas_state>\n${canvasSummary}\n</canvas_state>`);
   }
   if (canvasXml) blocks.push(canvasXml);
-  if (attachmentXml) blocks.push(attachmentXml);
+  if (attachmentXml) {
+    blocks.push(attachmentXml);
+    blocks.push(
+      "<vision_note>参考图已经以图片形式附在这条消息里，可以直接看到画面，不要只凭文件名判断。</vision_note>",
+    );
+  }
   if (input.kind === "image" || input.kind === "video") {
     blocks.push(`<user_intent>用户这次明确点的是${input.kind === "video" ? "生成视频" : "生成图片"}。</user_intent>`);
   }
   if (input.aspectRatio) blocks.push(`<aspect_ratio>${input.aspectRatio}</aspect_ratio>`);
   return blocks.join("\n\n");
+}
+
+/**
+ * 参考图不仅写进 XML，还作为视觉内容随消息一起发给模型。
+ * 否则模型只看得到文件名，回答「这是谁」「这张图什么风格」时就只能瞎猜。
+ */
+function buildHumanMessage(text: string, attachmentMap: Record<string, string>): HumanMessage {
+  const images = Object.keys(attachmentMap)
+    .sort((a, b) => {
+      const left = Number(a.split("-")[1]);
+      const right = Number(b.split("-")[1]);
+      return (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
+    })
+    .slice(0, 4)
+    .map((key) => attachmentMap[key])
+    .filter((url): url is string => Boolean(url));
+
+  if (images.length === 0) return new HumanMessage(text);
+
+  return new HumanMessage({
+    content: [
+      { type: "text", text },
+      ...images.map((url) => ({
+        type: "image_url" as const,
+        image_url: { url },
+      })),
+    ],
+  });
 }
 
 function readChunkText(chunk: unknown): string {
