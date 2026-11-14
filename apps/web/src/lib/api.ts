@@ -37,7 +37,7 @@ export type AgentHealth = {
   ok: boolean;
   name: string;
   store: "memory" | "supabase";
-  agent: "mock" | "llm";
+  generation: "mock" | "real";
   uptime: number;
 };
 

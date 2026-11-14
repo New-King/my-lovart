@@ -29,7 +29,7 @@ export function buildApp() {
     ok: true,
     name: APP_NAME,
     store: env.projectsStore,
-    agent: env.agentMode,
+    generation: env.generationMode,
     uptime: Math.round(process.uptime()),
   }));
 
@@ -40,8 +40,8 @@ export function buildApp() {
     app.log.warn("PROJECTS_STORE=memory：数据存在进程内存里，重启即清空");
   }
 
-  if (env.agentMode === "mock") {
-    app.log.warn("AGENT_MODE=mock：返回固定的图片/视频/灵感示例");
+  if (env.generationMode === "mock") {
+    app.log.warn("GENERATION_MODE=mock：返回固定的图片/视频/灵感示例");
   }
 
   registerProjectRoutes(app, repo);

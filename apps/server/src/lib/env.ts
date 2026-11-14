@@ -15,10 +15,7 @@ export const env = {
     | "supabase"
     | "memory",
 
-  // mock: 返回固定的图片/视频/灵感示例；llm: 走真实模型
-  agentMode: (required("AGENT_MODE", "mock") === "llm" ? "llm" : "mock") as "llm" | "mock",
-
-  // mock: 生成链继续走假数据；real: 调 Volces / Metaso 真实生成
+  // mock: 生成链继续走假数据；real: LangGraph Agent + Volces / Metaso 真实生成
   generationMode: (required("GENERATION_MODE", "mock") === "real" ? "real" : "mock") as
     | "real"
     | "mock",
@@ -30,4 +27,9 @@ export const env = {
   metasoApiKey: required("METASO_API_KEY"),
   metasoApiBase: required("METASO_API_BASE", "https://metaso.cn/api/minimax/"),
   metasoVideoModel: required("METASO_VIDEO_MODEL", "MiniMax-H3"),
+
+  /** Agent 走 OpenAI 兼容接口；项目里默认是 DeepSeek */
+  openAiApiKey: required("OPENAI_API_KEY"),
+  openAiApiBase: required("OPENAI_API_BASE", "https://api.openai.com/v1"),
+  agentModel: required("LOOMIC_AGENT_MODEL", required("OPENAI_MODEL", "deepseek-chat")),
 };

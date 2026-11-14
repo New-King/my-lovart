@@ -5,13 +5,11 @@ import type {
   ChatMessage,
   RunError,
   RunEvent,
-  RunStep,
 } from "@my-lovart/shared";
 import { env } from "../../lib/env.js";
-import { chat } from "../../lib/llm.js";
 import { normalizeAttachment } from "../files/file.store.js";
+import { runAgent } from "../agent/runtime.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
-import { createRealRun, looksLikeImage, looksLikeVideo } from "./real-agent.js";
 import {
   MAX_CONTEXT_MESSAGES,
   appendBlock,
@@ -38,13 +36,6 @@ export const MESSAGE_MAX = 4000;
 
 export class WorkspaceInputError extends Error {}
 
-const SYSTEM_PROMPT = `你是 mylovart 的 AI 设计助手，一个画布类设计工具里的对话角色。
-
-要求：
-- 用中文回答，简洁、具体、可执行。给建议时落到构图、配色（给出色值）、字体、尺寸这些层面。
-- 不要写客套话和总结段落。
-- 当用户明确要生成图片或视频时，系统会走生成工具；这里只需要给出方向性建议。`;
-
 export type RunInput = {
   text: string;
   kind: MockKind;
@@ -53,8 +44,6 @@ export type RunInput = {
   /** 服务端自己的公开地址，用于把生成结果落成 /files/:id */
   baseUrl?: string;
 };
-
-type Payload<T> = T extends unknown ? Omit<T, "runId" | "messageId" | "seq" | "at"> : never;
 
 const ASPECTS: AspectRatio[] = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 
@@ -130,25 +119,20 @@ export function createWorkspaceService() {
         .filter((message) => message.content);
 
       try {
-        const wantsMedia =
-          input.kind === "image" ||
-          input.kind === "video" ||
-          looksLikeImage(input.text) ||
-          looksLikeVideo(input.text) ||
-          (input.attachments?.length ?? 0) > 0;
-
-        if (env.generationMode === "real" && wantsMedia) {
+        if (env.generationMode === "real") {
           const baseUrl = input.baseUrl ?? `http://127.0.0.1:${env.port}`;
-          for await (const event of createRealRun({
+          for await (const event of runAgent({
             runId,
             messageId,
             text: input.text,
             kind: input.kind,
             aspectRatio: input.aspectRatio,
             attachments: input.attachments ?? [],
-            signal,
-            baseUrl,
             history,
+            canvasElements: ensureWorkspace(projectId).elements,
+            canvasFiles: ensureWorkspace(projectId).files,
+            baseUrl,
+            signal,
           })) {
             applyEvent(projectId, messageId, event);
             yield event;
@@ -160,12 +144,6 @@ export function createWorkspaceService() {
               return;
             }
           }
-          return;
-        }
-
-        // real 模式下纯聊天也走真实模型，避免「接的什么模型」说不清
-        if (env.agentMode === "llm" || env.generationMode === "real") {
-          yield* runLlm(projectId, runId, messageId, signal);
           return;
         }
 
@@ -215,80 +193,6 @@ export function createWorkspaceService() {
       }
     },
   };
-}
-
-/** LLM 模式没有工具，只有一条「生成回答」的步骤；事件形状保持一致。 */
-async function* runLlm(
-  projectId: string,
-  runId: string,
-  messageId: string,
-  signal: AbortSignal,
-): AsyncGenerator<RunEvent> {
-  let seq = 0;
-  const emit = (payload: Payload<RunEvent>): RunEvent =>
-    ({
-      ...payload,
-      runId,
-      messageId,
-      seq: seq++,
-      at: new Date().toISOString(),
-    }) as RunEvent;
-
-  const accepted = emit({ type: "run.accepted" });
-  applyEvent(projectId, messageId, accepted);
-  yield accepted;
-
-  const started = emit({ type: "run.started" });
-  applyEvent(projectId, messageId, started);
-  yield started;
-
-  const step: RunStep = {
-    id: randomUUID(),
-    kind: "reply",
-    title: "生成回答",
-    status: "running",
-    startedAt: new Date().toISOString(),
-  };
-  const stepStarted = emit({ type: "step.started", step });
-  applyEvent(projectId, messageId, stepStarted);
-  yield stepStarted;
-
-  const workspace = ensureWorkspace(projectId);
-  const history = workspace.messages
-    .filter((message) => message.status !== "queued" && message.status !== "streaming")
-    .slice(-MAX_CONTEXT_MESSAGES)
-    .map((message) => ({ role: message.role, content: message.content }));
-
-  try {
-    const reply = await chat([{ role: "system", content: SYSTEM_PROMPT }, ...history]);
-    if (signal.aborted) {
-      const canceled = emit({ type: "run.canceled" });
-      applyEvent(projectId, messageId, canceled);
-      yield canceled;
-      return;
-    }
-
-    const delta = emit({ type: "message.delta", delta: reply || "（模型没有返回内容）" });
-    applyEvent(projectId, messageId, delta);
-    yield delta;
-
-    const stepDone = emit({ type: "step.updated", stepId: step.id, status: "done" });
-    applyEvent(projectId, messageId, stepDone);
-    yield stepDone;
-
-    const completed = emit({ type: "run.completed" });
-    applyEvent(projectId, messageId, completed);
-    yield completed;
-  } catch (err) {
-    const error: RunError = {
-      code: "llm_error",
-      message: err instanceof Error ? err.message : "模型调用失败",
-      retriable: true,
-    };
-    const failed = emit({ type: "run.failed", error });
-    applyEvent(projectId, messageId, failed);
-    yield failed;
-  }
 }
 
 function applyEvent(projectId: string, messageId: string, event: RunEvent): void {

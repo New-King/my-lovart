@@ -105,11 +105,11 @@ export function ChatPanel({
   const nearBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
-  const [agent, setAgent] = useState<"mock" | "llm" | null>(null);
+  const [generation, setGeneration] = useState<"mock" | "real" | null>(null);
 
   useEffect(() => {
     getHealth()
-      .then((health) => setAgent(health.agent))
+      .then((health) => setGeneration(health.generation))
       .catch(() => {});
   }, []);
 
@@ -185,7 +185,7 @@ export function ChatPanel({
     return items.reverse();
   }, [messages]);
 
-  const agentLabel = agent === "mock" ? "mock-agent" : agent === "llm" ? "deepseek-flash" : "agent";
+  const agentLabel = generation === "real" ? "seedream · h3" : generation === "mock" ? "mock-agent" : "agent";
 
   return (
     <section className="flex w-full shrink-0 flex-col bg-canvas lg:w-[380px] lg:border-l lg:border-line">
