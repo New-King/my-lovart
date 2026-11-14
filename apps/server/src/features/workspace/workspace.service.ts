@@ -151,7 +151,10 @@ export function createWorkspaceService() {
             text: input.text,
             kind: input.kind,
             aspectRatio: input.aspectRatio,
-            attachments: input.attachments ?? [],
+            attachments: collectRunAttachments(
+              ensureWorkspace(projectId),
+              input.attachments ?? [],
+            ),
             history,
             canvasElements: ensureWorkspace(projectId).elements,
             canvasFiles: ensureWorkspace(projectId).files,
@@ -217,6 +220,38 @@ export function createWorkspaceService() {
       }
     },
   };
+}
+
+/**
+ * 当前消息的附件 + 最近几轮用户发过的图片。
+ * 附件只在发送那一轮存在，下一轮说「给这张图加点元素」时模型不能失忆。
+ */
+function collectRunAttachments(
+  workspace: Workspace,
+  current: ChatAttachment[],
+  limit = 8,
+): ChatAttachment[] {
+  const result: ChatAttachment[] = [];
+  const seen = new Set<string>();
+
+  const push = (attachment: ChatAttachment) => {
+    if (result.length >= limit) return;
+    if (!attachment.mimeType.startsWith("image/")) return;
+    if (seen.has(attachment.url)) return;
+    seen.add(attachment.url);
+    result.push(attachment);
+  };
+
+  for (const attachment of current) push(attachment);
+
+  for (let index = workspace.messages.length - 1; index >= 0; index -= 1) {
+    if (result.length >= limit) break;
+    const message = workspace.messages[index];
+    if (!message || message.role !== "user") continue;
+    for (const attachment of message.attachments ?? []) push(attachment);
+  }
+
+  return result;
 }
 
 function applyEvent(projectId: string, messageId: string, event: RunEvent): void {
