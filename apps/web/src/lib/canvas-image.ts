@@ -2,7 +2,6 @@ import {
   convertToExcalidrawElements,
   getCommonBounds,
   sceneCoordsToViewportCoords,
-  viewportCoordsToSceneCoords,
 } from "@excalidraw/excalidraw";
 import type {
   BinaryFileData,
@@ -34,25 +33,16 @@ type ImageDataInput = {
 };
 
 /**
- * 布局全部按画布维度的百分比算，不写死像素也不按 zoom 补偿：
- * 单图最大占画布宽 18%、高 34%，边距 4%/6%，间距 2%/3%。
- * 尺寸落在场景坐标里是固定的，所以缩放画布时新旧图片视觉上一起变大变小。
+ * 尺寸是固定的场景单位，不随窗口宽度或 zoom 变化：
+ * 整个项目里的图片保持同一世界尺度，缩放画布时一起变大变小。
  */
-const CELL_WIDTH_RATIO = 0.18;
-const CELL_HEIGHT_RATIO = 0.34;
-const PAD_X_RATIO = 0.04;
-const PAD_Y_RATIO = 0.06;
-const GAP_X_RATIO = 0.02;
-const GAP_Y_RATIO = 0.03;
-
-type LayoutMetrics = {
-  originX: number;
-  originY: number;
-  cellWidth: number;
-  cellHeight: number;
-  gapX: number;
-  gapY: number;
-};
+const IMAGE_MAX_WIDTH = 400;
+const IMAGE_MAX_HEIGHT = 500;
+const ROW_GAP = 24;
+const ROW_GAP_Y = 32;
+/** 新内容从画布原点 + 边距开始，不跟随当前视口 */
+const ORIGIN_X = 56;
+const ORIGIN_Y = 56;
 
 type RowSlot = { cursorX: number; y: number };
 type SceneElementLike = {
@@ -81,8 +71,8 @@ function rowsFor(api: ExcalidrawImperativeAPI) {
   return rows;
 }
 
-function fitSize(width: number, height: number, cellWidth: number, cellHeight: number) {
-  const scale = Math.min(1, cellWidth / width, cellHeight / height);
+function fitSize(width: number, height: number) {
+  const scale = Math.min(1, IMAGE_MAX_WIDTH / width, IMAGE_MAX_HEIGHT / height);
   return {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
@@ -93,29 +83,22 @@ function liveElements(api: ExcalidrawImperativeAPI) {
   return api.getSceneElements().filter((element) => !element.isDeleted);
 }
 
-function layoutMetrics(api: ExcalidrawImperativeAPI): LayoutMetrics {
+/** 只平移不改缩放，把目标区域放到视口附近 */
+function panToRect(
+  api: ExcalidrawImperativeAPI,
+  rect: { x: number; y: number; width: number; height: number },
+) {
   const appState = api.getAppState();
-  // 用画布维度（场景单位）的百分比作为图片尺寸基准，不除以 zoom。
-  // 这样图片尺寸是场景坐标里的固定比例，放大画布时新旧图片会一起变大。
-  const canvasWidth = Math.max(320, appState.width || 0);
-  const canvasHeight = Math.max(240, appState.height || 0);
-  const topLeft = viewportCoordsToSceneCoords(
-    { clientX: appState.offsetLeft, clientY: appState.offsetTop },
-    appState,
-  );
-
-  return {
-    originX: topLeft.x + canvasWidth * PAD_X_RATIO,
-    originY: topLeft.y + canvasHeight * PAD_Y_RATIO,
-    cellWidth: canvasWidth * CELL_WIDTH_RATIO,
-    cellHeight: canvasHeight * CELL_HEIGHT_RATIO,
-    gapX: canvasWidth * GAP_X_RATIO,
-    gapY: canvasHeight * GAP_Y_RATIO,
-  };
+  const zoom = appState.zoom?.value && appState.zoom.value > 0.05 ? appState.zoom.value : 1;
+  api.updateScene({
+    appState: {
+      scrollX: appState.width / (2 * zoom) - (rect.x + rect.width / 2),
+      scrollY: appState.height / (2 * zoom) - (rect.y + rect.height / 2),
+    },
+  });
 }
 
-/** 新元素完全落在视口外时，缩放到能看到全部内容 */
-function ensureElementVisible(api: ExcalidrawImperativeAPI, element: SceneElementLike) {
+function isVisible(api: ExcalidrawImperativeAPI, element: SceneElementLike) {
   const appState = api.getAppState();
   const topLeft = sceneCoordsToViewportCoords(
     { sceneX: element.x, sceneY: element.y },
@@ -126,15 +109,17 @@ function ensureElementVisible(api: ExcalidrawImperativeAPI, element: SceneElemen
     appState,
   );
   const padding = 48;
-  const visible =
+  return (
     bottomRight.x > padding &&
     topLeft.x < appState.width - padding &&
     bottomRight.y > padding &&
-    topLeft.y < appState.height - padding;
+    topLeft.y < appState.height - padding
+  );
+}
 
-  if (!visible) {
-    api.scrollToContent(api.getSceneElements(), { fitToContent: true });
-  }
+/** 新元素落在视口外时平移过去，保持当前缩放 */
+function ensureElementVisible(api: ExcalidrawImperativeAPI, element: SceneElementLike) {
+  if (!isVisible(api, element)) panToRect(api, element);
 }
 
 /**
@@ -170,20 +155,19 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
   }
   if (loose.length > 0) groups.push(loose);
 
-  const metrics = layoutMetrics(api);
   const placements = new Map<string, { x: number; y: number }>();
 
-  let rowY = metrics.originY;
+  let rowY = ORIGIN_Y;
   for (const group of groups) {
-    let rowX = metrics.originX;
+    let rowX = ORIGIN_X;
     let rowHeight = 0;
     for (const image of group) {
       // 整理只挪位置，不改变图片本身尺寸
       placements.set(image.id, { x: rowX, y: rowY });
-      rowX += image.width + metrics.gapX;
+      rowX += image.width + ROW_GAP;
       rowHeight = Math.max(rowHeight, image.height);
     }
-    rowY += rowHeight + metrics.gapY;
+    rowY += rowHeight + ROW_GAP_Y;
   }
 
   const nextElements = scene.map((element) => {
@@ -204,6 +188,11 @@ export function arrangeCanvasImages(api: ExcalidrawImperativeAPI) {
     elements: nextElements as never[],
     captureUpdate: "IMMEDIATELY",
   });
+
+  const first = (nextElements as unknown as SceneElementLike[]).find(
+    (element) => element.type === "image" && !element.isDeleted,
+  );
+  if (first) ensureElementVisible(api, first);
   return images.length;
 }
 
@@ -241,14 +230,12 @@ async function insertImageData(
       ? { width: input.width, height: input.height }
       : await loadImageSize(input.dataURL);
 
+  const { width, height } = fitSize(natural.width, natural.height);
+
   let x: number;
   let y: number;
-  let width: number;
-  let height: number;
 
   if (input.placement) {
-    const metrics = layoutMetrics(api);
-    ({ width, height } = fitSize(natural.width, natural.height, metrics.cellWidth, metrics.cellHeight));
     x = input.placement.x - width / 2;
     y = input.placement.y - height / 2;
   } else {
@@ -258,9 +245,6 @@ async function insertImageData(
       appState = api.getAppState();
     }
 
-    const metrics = layoutMetrics(api);
-    ({ width, height } = fitSize(natural.width, natural.height, metrics.cellWidth, metrics.cellHeight));
-
     const rows = rowsFor(api);
     let row = input.batchId ? rows.get(input.batchId) : undefined;
 
@@ -269,16 +253,16 @@ async function insertImageData(
       x = row.cursorX;
       y = row.y;
     } else {
-      const scene = liveElements(api);
-      if (scene.length === 0) {
-        // 空白画布 → 左上角起排，不居中也不铺满
-        x = metrics.originX;
-        y = metrics.originY;
+      const images = liveElements(api).filter((element) => element.type === "image");
+      if (images.length === 0) {
+        // 空白画布 → 从画布原点开始，位置稳定不跟视口跑
+        x = ORIGIN_X;
+        y = ORIGIN_Y;
       } else {
-        // 已有内容 → 新批次另起一行，放在内容下方
-        const [left, , , bottom] = getCommonBounds(scene);
-        x = Number.isFinite(left) ? left : metrics.originX;
-        y = (Number.isFinite(bottom) ? bottom : metrics.originY) + metrics.gapY;
+        // 已有图片 → 新批次另起一行，接在所有图片下方
+        const [, , , bottom] = getCommonBounds(images);
+        x = ORIGIN_X;
+        y = (Number.isFinite(bottom) ? bottom : ORIGIN_Y) + ROW_GAP_Y;
       }
 
       if (input.batchId) {
@@ -287,7 +271,7 @@ async function insertImageData(
       }
     }
 
-    if (row) row.cursorX = x + width + metrics.gapX;
+    if (row) row.cursorX = x + width + ROW_GAP;
   }
 
   const fileId = crypto.randomUUID() as BinaryFileData["id"];
