@@ -179,6 +179,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           width: payload.width,
           height: payload.height,
           placement: point ?? undefined,
+          ...(payload.batchId ? { batchId: payload.batchId } : {}),
         });
         await waitAtLeast(started, 350);
         showToast("success", "图片已添加到画布");

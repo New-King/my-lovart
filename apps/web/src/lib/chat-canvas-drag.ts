@@ -8,6 +8,7 @@ export type ChatImageDragPayload = {
   mimeType?: string;
   width?: number;
   height?: number;
+  batchId?: string;
 };
 
 const payloads = new Map<string, ChatImageDragPayload>();
