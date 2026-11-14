@@ -107,7 +107,12 @@ export function buildCanvasContext(
   }
 
   if (briefs.length === 0) {
-    return { summary: "画布目前为空。", map: {}, xml: "", elements: [] };
+    return {
+      summary: "画布目前为空：没有任何图片或图形。不要引用画布上的图片，也不要假设用户已经上传。",
+      map: {},
+      xml: "",
+      elements: [],
+    };
   }
 
   const map: Record<string, string> = {};
