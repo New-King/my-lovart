@@ -29,6 +29,33 @@ const TOOL_ICONS = {
   search_inspiration: Search,
 } as const;
 
+/** 外圈八格的顺时针顺序（跳过中间的 index 4） */
+const RING_ORDER = [0, 1, 2, 5, 8, 7, 6, 3];
+
+/** 3×3 方块 loading：外圈顺时针依次点亮，中间一格常暗 */
+function SquareSpinner() {
+  return (
+    <span className="grid grid-cols-3 gap-[1.5px]" aria-hidden>
+      {Array.from({ length: 9 }, (_, index) => {
+        const order = RING_ORDER.indexOf(index);
+        return (
+          <motion.span
+            key={index}
+            className="size-[3px] rounded-[0.5px] bg-ink"
+            initial={{ opacity: order >= 0 ? 0.22 : 0.32 }}
+            animate={order >= 0 ? { opacity: [0.22, 1, 0.22] } : { opacity: 0.32 }}
+            transition={
+              order >= 0
+                ? { duration: 1.1, repeat: Infinity, delay: order * 0.1, ease: "easeInOut" }
+                : { duration: 0 }
+            }
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 function formatDuration(start: string, end: string | undefined, now: number): string {
   const from = new Date(start).getTime();
   const to = end ? new Date(end).getTime() : now;
@@ -223,7 +250,7 @@ export function RunProcess({ message }: { message: ChatMessage }) {
       >
         <span className="grid size-3.5 shrink-0 place-items-center">
           {live ? (
-            <Loader2 className="size-3 animate-spin text-muted" strokeWidth={2} />
+            <SquareSpinner />
           ) : failed ? (
             <AlertCircle className="size-3 text-danger" strokeWidth={2} />
           ) : (

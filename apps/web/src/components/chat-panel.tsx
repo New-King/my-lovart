@@ -328,11 +328,11 @@ export function ChatPanel({
               onPickStarter={(text) => composerRef.current?.setText(text)}
             />
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {messages.map((message, index) =>
                 message.role === "user" ? (
-                  <div key={message.id} className="group flex flex-col items-end gap-1">
-                    <div className="max-w-[85%] rounded-xl border border-line bg-surface px-3 py-2 text-[13px] leading-relaxed">
+                  <div key={message.id} className="group relative flex flex-col items-end gap-1 lg:gap-0">
+                    <div className="relative max-w-[85%] rounded-xl border border-line bg-surface px-3 py-2 text-[13px] leading-relaxed">
                       {message.attachments && message.attachments.length > 0 && (
                         <div className={message.content ? "mb-2" : ""}>
                           <MessageAttachments
@@ -346,9 +346,15 @@ export function ChatPanel({
                       {message.content && (
                         <p className="whitespace-pre-wrap break-words">{message.content}</p>
                       )}
+                      {/* 桌面端把复制按钮浮在气泡左外侧，不占行高；移动端没有 hover，留在气泡下方 */}
+                      {message.content && (
+                        <div className="absolute bottom-0 right-full mr-1 hidden opacity-0 transition-opacity group-hover:opacity-100 lg:block">
+                          <CopyButton text={message.content} />
+                        </div>
+                      )}
                     </div>
                     {message.content && (
-                      <div className="flex justify-end pr-0.5">
+                      <div className="flex justify-end pr-0.5 lg:hidden">
                         <CopyButton text={message.content} />
                       </div>
                     )}
