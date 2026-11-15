@@ -373,14 +373,13 @@ export function ChatPanel({
                           unit.kind === "text" ? (
                             <div
                               key={unit.key}
-                              className="prose-muse text-[13.5px] leading-[1.7] text-ink"
+                              className={`prose-muse text-[13.5px] leading-[1.7] text-ink ${
+                                unit.cursor ? "prose-streaming" : ""
+                              }`}
                             >
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {unit.text}
                               </ReactMarkdown>
-                              {unit.cursor && (
-                                <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-ink/40 align-middle" />
-                              )}
                             </div>
                           ) : (
                             <ChatBlocks
@@ -398,13 +397,14 @@ export function ChatPanel({
                     ) : (
                       <>
                         {message.content && (
-                          <div className="prose-muse text-[13.5px] leading-[1.7] text-ink">
+                          <div
+                            className={`prose-muse text-[13.5px] leading-[1.7] text-ink ${
+                              message.status === "streaming" ? "prose-streaming" : ""
+                            }`}
+                          >
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {message.content}
                             </ReactMarkdown>
-                            {message.status === "streaming" && (
-                              <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-ink/40 align-middle" />
-                            )}
                           </div>
                         )}
 
