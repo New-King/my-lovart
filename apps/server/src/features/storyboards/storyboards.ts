@@ -2,6 +2,8 @@ export type StoryboardStatus = "draft" | "ready" | "generating" | "completed";
 export type ShotStatus = "draft" | "generating" | "ready" | "failed";
 /** image = 视觉分镜/概念；video = 可执行视频时间线 */
 export type StoryboardKind = "image" | "video";
+/** 执行锚图类型：产品主体、角色、场景、主视觉/色调 */
+export type AnchorType = "product" | "character" | "scene" | "style";
 
 export type Storyboard = {
   id: string;
@@ -11,8 +13,11 @@ export type Storyboard = {
   kind: StoryboardKind;
   aspectRatio?: string;
   style?: string;
-  /** 产品/角色/视觉设定图：后续所有关键帧的共享参考；null 表示显式清空 */
+  /** 产品锚图（原 canon）：整条片子的产品身份基准 */
   canonAssetId?: string | null;
+  characterAnchorAssetId?: string | null;
+  sceneAnchorAssetId?: string | null;
+  styleAnchorAssetId?: string | null;
   /** 视频总时长；kind=video 时必填 */
   totalDurationSeconds?: number;
   status: StoryboardStatus;
@@ -32,6 +37,12 @@ export type StoryboardShot = {
   durationSeconds?: number;
   camera?: string;
   transition?: string;
+  /** 这一镜在片子里负责什么：开场建立/卖点强调/承接/收尾 */
+  sceneGoal?: string;
+  /** 与前后镜的衔接：承接什么、留下什么状态 */
+  continuityNote?: string;
+  /** 这一镜不允许出现的跑偏内容 */
+  negativePrompt?: string;
   /** 旧字段：兼容旧数据；新代码按 firstFrame/video 读写 */
   activeAssetId?: string;
   firstFrameAssetId?: string;
@@ -69,6 +80,12 @@ export type StoryboardShotInput = {
   durationSeconds?: number;
   camera?: string;
   transition?: string;
+  /** 这一镜在片子里负责什么：开场建立/卖点强调/承接/收尾 */
+  sceneGoal?: string;
+  /** 与前后镜的衔接：承接什么、留下什么状态 */
+  continuityNote?: string;
+  /** 这一镜不允许出现的跑偏内容 */
+  negativePrompt?: string;
 };
 
 export type CreateStoryboardInput = {
@@ -101,6 +118,12 @@ export type UpdateShotInput = {
   durationSeconds?: number;
   camera?: string;
   transition?: string;
+  /** 这一镜在片子里负责什么：开场建立/卖点强调/承接/收尾 */
+  sceneGoal?: string;
+  /** 与前后镜的衔接：承接什么、留下什么状态 */
+  continuityNote?: string;
+  /** 这一镜不允许出现的跑偏内容 */
+  negativePrompt?: string;
   status?: ShotStatus;
 };
 

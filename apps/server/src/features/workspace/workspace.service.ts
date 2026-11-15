@@ -604,6 +604,9 @@ function assetFromArtifact(
     metadata: {
       ...(artifact.batchId ? { batchId: artifact.batchId } : {}),
       ...(artifact.type === "image" && artifact.role ? { role: artifact.role } : {}),
+      ...(artifact.type === "image" && artifact.anchorType
+        ? { anchorType: artifact.anchorType }
+        : {}),
     },
     createdAt: at,
   };

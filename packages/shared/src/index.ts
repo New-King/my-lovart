@@ -58,6 +58,8 @@ export type ToolBlock = {
 
 /** 图片在视频前期里的角色；canon 是产品/角色设定图，后续关键帧都必须引用它 */
 export type AssetRole = "free" | "canon" | "keyframe" | "end_frame";
+/** 设定图锚点类型；product 是主产品，其余按需生成 */
+export type AnchorType = "product" | "character" | "scene" | "style";
 
 export type ImageBlock = {
   type: "image";
@@ -75,6 +77,8 @@ export type ImageBlock = {
   sourceAssetIds?: string[];
   /** 这张图是设定图、首帧还是尾帧；账本据此分流镜头指针 */
   role?: AssetRole;
+  /** role=canon 时的锚点类型 */
+  anchorType?: AnchorType;
   /** 生成时挂到哪个分镜镜头；worker/账本用于自动成为镜头当前版本 */
   shotId?: string;
   /** 服务端已落画布时的元素 id；前端据此只刷新，不重复插入 */

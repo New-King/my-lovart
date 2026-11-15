@@ -50,11 +50,18 @@ async function attachToShot(
   assetId: string,
   role: string,
   storyboardId: string,
+  anchorType: string,
 ): Promise<void> {
   try {
     const repo = await getStoryboardsRepository();
     if (role === "canon") {
-      if (storyboardId) await repo.setCanonAsset(projectId, storyboardId, assetId);
+      if (storyboardId) {
+        const type =
+          anchorType === "character" || anchorType === "scene" || anchorType === "style"
+            ? anchorType
+            : "product";
+        await repo.setAnchorAsset(projectId, storyboardId, type, assetId);
+      }
       return;
     }
     if (!shotId) return;
@@ -161,6 +168,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
   const shotId = asString(payload.shotId);
   const storyboardId = asString(payload.storyboardId);
   const role = asString(payload.role) || "free";
+  const anchorType = asString(payload.anchorType) || "product";
   if (!prompt) throw new Error("job payload 缺少 prompt");
 
   const inputImages = Array.isArray(payload.inputImages)
@@ -202,6 +210,14 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     aspectRatio: asString(payload.aspectRatio) || "3:4",
     role:
       role === "canon" || role === "keyframe" || role === "end_frame" ? role : "free",
+    ...(role === "canon"
+      ? {
+          anchorType:
+            anchorType === "character" || anchorType === "scene" || anchorType === "style"
+              ? anchorType
+              : ("product" as const),
+        }
+      : {}),
     sourceAssetIds,
     ...(shotId ? { shotId } : {}),
   };
@@ -234,7 +250,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     });
 
   if (shotId || (role === "canon" && storyboardId)) {
-    await attachToShot(job.projectId, shotId, artifact.id, role, storyboardId);
+    await attachToShot(job.projectId, shotId, artifact.id, role, storyboardId, anchorType);
   }
 
   return { artifact, jobId: job.id, ...(placed ? { elementId: placed.elementId, placement: placed.placement } : {}) };
@@ -321,7 +337,7 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
       console.warn("[worker] 视频资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
-  if (shotId) await attachToShot(job.projectId, shotId, artifact.id, "video", "");
+  if (shotId) await attachToShot(job.projectId, shotId, artifact.id, "video", "", "");
 
   return {
     artifact,

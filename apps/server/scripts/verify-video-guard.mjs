@@ -262,7 +262,175 @@ try {
     freshKeyframe?.code ?? "allowed",
   );
 
-  // 9) 用户明确要求跳过时才放行
+  // 9) 多镜头：首镜缺尾帧拒绝；下一镜必须承接上一镜尾帧
+  const board2 = await repo.create(projectId, {
+    title: "保温杯 10 秒广告",
+    brief: "两镜：通勤开场 + 冰水对比收尾",
+    kind: "video",
+    totalDurationSeconds: 10,
+    shots: [
+      {
+        title: "通勤开场",
+        sceneGoal: "开场建立",
+        continuityNote: "结尾停在杯盖特写，交给下一镜",
+        durationSeconds: 5,
+      },
+      {
+        title: "冰水对比",
+        sceneGoal: "卖点强调",
+        continuityNote: "承接杯盖特写",
+        durationSeconds: 5,
+      },
+    ],
+  });
+  const [shot1, shot2] = board2.shots;
+  await getDb()
+    .from("storyboard_shots")
+    .update({ created_at: hourAgo })
+    .eq("storyboard_id", board2.storyboard.id);
+
+  const styleId = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: styleId,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "冷白日系主视觉锚图",
+    prompt: "冷白 + 浅木色，柔和侧逆光，极简留白",
+    url: "http://127.0.0.1:3001/files/verify-style-anchor",
+    mimeType: "image/png",
+    width: 1024,
+    height: 1024,
+    sourceAssetIds: [],
+    metadata: { role: "canon", anchorType: "style" },
+    createdAt: hourAgo,
+  });
+  await repo.setAnchorAsset(projectId, board2.storyboard.id, "style", styleId);
+  await repo.setAnchorAsset(projectId, board2.storyboard.id, "product", canonId);
+
+  const first1 = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: first1,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "通勤开场 首帧",
+    prompt: "清晨街角，保温杯",
+    url: "http://127.0.0.1:3001/files/verify-shot1-first",
+    mimeType: "image/png",
+    width: 1280,
+    height: 720,
+    sourceAssetIds: [canonId, styleId],
+    shotId: shot1.id,
+    metadata: { role: "keyframe" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyFirstFrame(projectId, shot1.id, first1);
+
+  const missingEnd = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    shot1.id,
+    false,
+  );
+  check(
+    "多镜头首镜缺尾帧时拒绝出片",
+    missingEnd?.code === "end_frame_required",
+    missingEnd?.code ?? "allowed",
+  );
+
+  const end1 = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: end1,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "通勤开场 尾帧",
+    prompt: "杯盖特写，保留交接状态",
+    url: "http://127.0.0.1:3001/files/verify-shot1-end",
+    mimeType: "image/png",
+    width: 1280,
+    height: 720,
+    sourceAssetIds: [canonId, styleId, first1],
+    shotId: shot1.id,
+    metadata: { role: "end_frame" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyEndFrame(projectId, shot1.id, end1);
+
+  const shot2Plan = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot2.id,
+  });
+  check(
+    "下一镜首帧自动承接上一镜尾帧",
+    shot2Plan.references.includes("http://127.0.0.1:3001/files/verify-shot1-end") &&
+      shot2Plan.sourceAssetIds.includes(end1),
+    `refs=${shot2Plan.references.length}`,
+  );
+  check(
+    "生成 prompt 带上镜头职责和衔接",
+    Boolean(
+      shot2Plan.shotDirection?.includes("卖点强调") &&
+        shot2Plan.shotDirection?.includes("承接杯盖特写"),
+    ),
+    shot2Plan.shotDirection ?? "empty",
+  );
+
+  const looseStart = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: looseStart,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "冰水对比 首帧（没接上）",
+    prompt: "没有承接上一镜",
+    url: "http://127.0.0.1:3001/files/verify-shot2-loose",
+    mimeType: "image/png",
+    width: 1280,
+    height: 720,
+    sourceAssetIds: [canonId, styleId],
+    shotId: shot2.id,
+    metadata: { role: "keyframe" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyFirstFrame(projectId, shot2.id, looseStart);
+  const loose = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    shot2.id,
+    false,
+  );
+  check(
+    "没承接上一镜尾帧的首帧被拒绝",
+    loose?.code === "continuity_not_anchored",
+    loose?.code ?? "allowed",
+  );
+
+  const first2 = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: first2,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "冰水对比 首帧",
+    prompt: "承接杯盖特写，切到冰水",
+    url: "http://127.0.0.1:3001/files/verify-shot2-first",
+    mimeType: "image/png",
+    width: 1280,
+    height: 720,
+    sourceAssetIds: [canonId, styleId, end1],
+    shotId: shot2.id,
+    metadata: { role: "keyframe" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyFirstFrame(projectId, shot2.id, first2);
+  const continuous = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    shot2.id,
+    false,
+  );
+  check("两镜首尾帧接通后放行", continuous === null, continuous?.code ?? "allowed");
+
+  // 10) 用户明确要求跳过时才放行
   const direct = await checkVideoPreflight(
     baseContext(new Date().toISOString()),
     undefined,

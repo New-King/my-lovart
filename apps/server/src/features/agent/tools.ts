@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { tool } from "@langchain/core/tools";
 import type {
+  AnchorType,
   AspectRatio,
   CanvasCommand,
   ImageBlock,
@@ -39,6 +40,13 @@ const imageSchema = z.object({
     .min(1)
     .optional()
     .describe("role=canon 时必填，把设定图挂到这个分镜"),
+  anchorType: z
+    .enum(["product", "character", "scene", "style"])
+    .optional()
+    .default("product")
+    .describe(
+      "role=canon 的锚点类型：product 产品主体（必需）、character 角色、scene 场景、style 主视觉/色调；没有人物就不要生成 character",
+    ),
   role: z
     .enum(["free", "canon", "keyframe", "end_frame"])
     .optional()
@@ -166,6 +174,21 @@ const shotInputSchema = z.object({
   durationSeconds: z.number().min(1).max(15).optional(),
   camera: z.string().max(80).optional().describe("机位/运动，如 俯拍、推镜"),
   transition: z.string().max(80).optional().describe("转场，如 叠化、切"),
+  sceneGoal: z
+    .string()
+    .max(120)
+    .optional()
+    .describe("这一镜的职责：开场建立 / 卖点强调 / 承接 / 收尾；不要每镜重复"),
+  continuityNote: z
+    .string()
+    .max(300)
+    .optional()
+    .describe("承接上一镜什么、结束时给下一镜留下什么；单镜头写内部节拍"),
+  negativePrompt: z
+    .string()
+    .max(300)
+    .optional()
+    .describe("这一镜不允许出现的内容：多余文字、错误材质、无关人物等"),
 });
 
 const createStoryboardSchema = z.object({
@@ -213,6 +236,9 @@ const updateShotSchema = z.object({
   durationSeconds: z.number().min(1).max(15).optional(),
   camera: z.string().max(80).optional(),
   transition: z.string().max(80).optional(),
+  sceneGoal: z.string().max(120).optional(),
+  continuityNote: z.string().max(300).optional(),
+  negativePrompt: z.string().max(300).optional(),
   status: z.enum(["draft", "generating", "ready", "failed"]).optional(),
 });
 
@@ -251,6 +277,7 @@ async function attachArtifactToShot(
   artifact: ImageBlock,
   role: ImageRole = "keyframe",
   storyboardId?: string,
+  anchorType: AnchorType = "product",
 ): Promise<void> {
   try {
     // 先落资产再写指针：canon/first_frame 都有外键约束，不能先指针后资产
@@ -269,12 +296,14 @@ async function attachArtifactToShot(
       ...(artifact.aspectRatio ? { aspectRatio: artifact.aspectRatio } : {}),
       sourceAssetIds: artifact.sourceAssetIds ?? [],
       ...(shotId ? { shotId } : {}),
-      metadata: { role },
+      metadata: { role, ...(role === "canon" ? { anchorType } : {}) },
       createdAt: new Date().toISOString(),
     });
     const repo = await getStoryboardsRepository();
     if (role === "canon") {
-      if (storyboardId) await repo.setCanonAsset(projectId, storyboardId, artifact.id);
+      if (storyboardId) {
+        await repo.setAnchorAsset(projectId, storyboardId, anchorType, artifact.id);
+      }
       return;
     }
     if (!shotId) return;
@@ -296,16 +325,25 @@ type ImageRole = "free" | "canon" | "keyframe" | "end_frame";
 type ImageReferencePlan = {
   role: ImageRole;
   references: string[];
+  sourceAssetIds: string[];
+  anchorType?: AnchorType;
   canonId?: string;
   shotId?: string;
   storyboardId?: string;
+  /** 镜头职责/衔接/禁止项的文本，生成时附到 prompt，确保和脚本一致 */
+  shotDirection?: string;
   error?: Record<string, unknown>;
 };
 
+function dedupe(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
 /**
  * 图片生成的参考图计划：
- * - canon：产品/角色设定图，可引用用户上传的产品图；
- * - keyframe / end_frame：必须属于某个镜头，并自动把该分镜的 canon 放到参考图第一位；
+ * - canon：产品/角色/场景/主视觉锚图，可引用用户上传的产品图；
+ * - keyframe：自动引用该分镜全部锚图，并承接上一镜头尾帧；
+ * - end_frame：引用锚图 + 当前镜头首帧，保证这一镜结尾能接下一镜；
  * - free：普通图片，不参与视频前期。
  */
 export async function planImageReferences(
@@ -314,6 +352,7 @@ export async function planImageReferences(
     role?: ImageRole;
     shotId?: string;
     storyboardId?: string;
+    anchorType?: AnchorType;
     inputImages?: string[];
   },
 ): Promise<ImageReferencePlan> {
@@ -325,16 +364,19 @@ export async function planImageReferences(
   );
 
   if (role === "free") {
-    return { role, references: explicit };
+    return { role, references: explicit, sourceAssetIds: [] };
   }
 
   if (role === "canon") {
+    const anchorType = input.anchorType ?? "product";
     if (input.shotId) {
       return {
         role,
         references: explicit,
+        sourceAssetIds: [],
+        anchorType,
         error: {
-          error: "设定图不能挂到某个镜头；role=canon 只传 storyboardId 或不传",
+          error: "锚图不能挂到某个镜头；role=canon 只传 storyboardId 或不传",
           code: "invalid_canon_target",
         },
       };
@@ -346,13 +388,17 @@ export async function planImageReferences(
         return {
           role,
           references: explicit,
-          error: { error: "找不到这个分镜，不能挂设定图", code: "invalid_storyboard" },
+          sourceAssetIds: [],
+          anchorType,
+          error: { error: "找不到这个分镜，不能挂锚图", code: "invalid_storyboard" },
         };
       }
     }
     return {
       role,
       references: explicit.slice(0, 4),
+      sourceAssetIds: [],
+      anchorType,
       ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
     };
   }
@@ -361,6 +407,7 @@ export async function planImageReferences(
     return {
       role,
       references: explicit,
+      sourceAssetIds: [],
       error: {
         error: "首帧/尾帧必须传 shotId，先建分镜镜头再出关键帧",
         code: "shot_required",
@@ -374,45 +421,126 @@ export async function planImageReferences(
     return {
       role,
       references: explicit,
+      sourceAssetIds: [],
       error: { error: "找不到这个镜头", code: "invalid_shot" },
     };
   }
-  if (!found.storyboard.canonAssetId) {
+  const board = found.storyboard;
+  if (!board.canonAssetId) {
     return {
       role,
       references: explicit,
+      sourceAssetIds: [],
       shotId: input.shotId,
       error: {
         error:
-          "这个分镜还没有产品/角色设定图，不能各自文生图。先生成 canon（有产品实拍图就用它做参考），确认后再出关键帧。",
+          "这个分镜还没有产品锚图，不能各自文生图。先生成产品锚图（有产品实拍图就用它做参考），确认后再出关键帧。",
         code: "canon_required",
-        next: "generate_image(role=canon) → update_storyboard(canonAssetId) → generate_image(shotId, role=keyframe)",
+        next: "generate_image(role=canon, anchorType=product) → generate_image(role=canon, anchorType=style/scene 按需) → generate_image(shotId, role=keyframe)",
       },
     };
   }
-  const canon = await (await getAssetsRepository()).get(
-    context.projectId,
-    found.storyboard.canonAssetId,
+
+  const assets = await getAssetsRepository();
+  const anchorIds = [
+    board.canonAssetId,
+    board.characterAnchorAssetId,
+    board.sceneAnchorAssetId,
+    board.styleAnchorAssetId,
+  ].filter((id): id is string => Boolean(id));
+  const anchorAssets = await Promise.all(
+    anchorIds.map((id) => assets.get(context.projectId, id)),
   );
-  if (!canon) {
+  const validAnchors = anchorAssets.filter(
+    (asset): asset is ProjectAsset => Boolean(asset && asset.kind === "image"),
+  );
+  if (validAnchors.length === 0) {
     return {
       role,
       references: explicit,
+      sourceAssetIds: [],
       shotId: input.shotId,
       error: {
-        error: "分镜的设定图资产已不存在，请重新生成或指定 canon",
+        error: "分镜的锚图资产已不存在，请重新生成或指定产品锚图",
         code: "canon_missing",
       },
     };
   }
 
-  const references = [canon.url, ...explicit.filter((url) => url !== canon.url)].slice(0, 4);
+  const detail = await repo.get(context.projectId, board.id);
+  const ordered = detail ? activeShots(detail) : [];
+  const index = ordered.findIndex((shot) => shot.id === input.shotId);
+  const previous = index > 0 ? ordered[index - 1] : undefined;
+
+  const sourceAssetIds = validAnchors.map((asset) => asset.id);
+  const continuityRefs: string[] = [];
+
+  if (role === "keyframe" && previous) {
+    if (!previous.endFrameAssetId) {
+      return {
+        role,
+        references: explicit,
+        sourceAssetIds,
+        shotId: input.shotId,
+        error: {
+          error: `上一镜「${previous.title}」还没有尾帧，接不上。先生成上一镜的 end_frame，再出这一镜首帧。`,
+          code: "previous_end_frame_required",
+          previous_shot_id: previous.id,
+        },
+      };
+    }
+    const previousEnd = await assets.get(context.projectId, previous.endFrameAssetId);
+    if (previousEnd?.kind === "image") {
+      continuityRefs.push(previousEnd.url);
+      sourceAssetIds.push(previousEnd.id);
+    }
+  }
+
+  if (role === "end_frame") {
+    const firstId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
+    if (!firstId) {
+      return {
+        role,
+        references: explicit,
+        sourceAssetIds,
+        shotId: input.shotId,
+        error: {
+          error: "这一镜还没有首帧，不能生成尾帧；先生成 keyframe。",
+          code: "first_frame_required",
+        },
+      };
+    }
+    const first = await assets.get(context.projectId, firstId);
+    if (first?.kind === "image") {
+      continuityRefs.push(first.url);
+      sourceAssetIds.push(first.id);
+    }
+  }
+
+  const references = dedupe([
+    ...validAnchors
+      .slice(0, role === "keyframe" && !previous ? 4 : 3)
+      .map((asset) => asset.url),
+    ...continuityRefs,
+    ...explicit,
+  ]).slice(0, 4);
+
+  const shotDirection = [
+    found.shot.sceneGoal ? `镜头职责：${found.shot.sceneGoal}` : "",
+    found.shot.continuityNote ? `前后衔接：${found.shot.continuityNote}` : "",
+    found.shot.negativePrompt ? `不要出现：${found.shot.negativePrompt}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   return {
     role,
     references,
-    canonId: canon.id,
+    sourceAssetIds: dedupe(sourceAssetIds),
+    canonId: board.canonAssetId,
     shotId: input.shotId,
-    storyboardId: found.storyboard.id,
+    storyboardId: board.id,
+    ...(shotDirection ? { shotDirection } : {}),
   };
 }
 
@@ -514,6 +642,45 @@ export async function checkVideoPreflight(
       shot_id: found.shot.id,
     };
   }
+
+  if (found.storyboard.kind === "video") {
+    const detail = await repo.get(context.projectId, found.storyboard.id);
+    const ordered = detail ? activeShots(detail) : [];
+    const index = ordered.findIndex((item) => item.id === found.shot.id);
+    const previous = index > 0 ? ordered[index - 1] : undefined;
+    const lastIndex = ordered.length - 1;
+
+    if (previous) {
+      if (!previous.endFrameAssetId) {
+        return {
+          error: `上一镜「${previous.title}」还没有尾帧，接不上。先生成上一镜的 end_frame，再生成这一镜。`,
+          code: "continuity_required",
+          previous_shot_id: previous.id,
+        };
+      }
+      const anchored =
+        firstFrameId === previous.endFrameAssetId ||
+        keyframe.sourceAssetIds.includes(previous.endFrameAssetId);
+      if (!anchored) {
+        return {
+          error:
+            "这一镜首帧没有承接上一镜尾帧，剪辑点会跳。重新用 generate_image(shotId, role=keyframe) 出首帧，服务端会自动把上一镜尾帧作为参考。",
+          code: "continuity_not_anchored",
+          previous_shot_id: previous.id,
+        };
+      }
+    }
+
+    if (index >= 0 && index < lastIndex && !found.shot.endFrameAssetId) {
+      return {
+        error:
+          "多镜头分镜里，每个非收尾镜头都要有尾帧，才能和下一镜接上。先生成这一镜的 end_frame。",
+        code: "end_frame_required",
+        shot_id: found.shot.id,
+      };
+    }
+  }
+
   const keyframeCreatedAt = new Date(keyframe.createdAt).getTime();
   if (Number.isFinite(keyframeCreatedAt) && keyframeCreatedAt >= runStartedAt - 2000) {
     return {
@@ -546,6 +713,7 @@ export function createAgentTools(context: ToolContext) {
       async (input) => {
         const plan = await planImageReferences(context, {
           role: input.role,
+          anchorType: input.anchorType,
           ...(input.shotId ? { shotId: input.shotId } : {}),
           ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
           ...(input.inputImages ? { inputImages: input.inputImages } : {}),
@@ -553,10 +721,10 @@ export function createAgentTools(context: ToolContext) {
         if (plan.error) return JSON.stringify(plan.error);
         const referenceImages = plan.references;
         const role = plan.role;
-        const sourceAssetIds = [
-          ...(plan.canonId ? [plan.canonId] : []),
-          ...(input.inputImages ?? []),
-        ];
+        const sourceAssetIds = plan.sourceAssetIds;
+        const prompt = plan.shotDirection
+          ? `${input.prompt}\n\n${plan.shotDirection}`
+          : input.prompt;
 
         if (jobsEnabled()) {
           try {
@@ -566,12 +734,13 @@ export function createAgentTools(context: ToolContext) {
               type: "image_generation",
               ...(context.threadId ? { threadId: context.threadId } : {}),
               payload: {
-                prompt: input.prompt,
+                prompt,
                 title: input.title,
                 aspectRatio: input.aspectRatio,
                 inputImages: referenceImages,
                 sourceAssetIds,
                 role,
+                ...(role === "canon" ? { anchorType: plan.anchorType ?? "product" } : {}),
                 ...(input.shotId ? { shotId: input.shotId } : {}),
                 ...(plan.storyboardId ? { storyboardId: plan.storyboardId } : {}),
               },
@@ -603,6 +772,7 @@ export function createAgentTools(context: ToolContext) {
                   result.artifact,
                   role,
                   plan.storyboardId,
+                  plan.anchorType ?? "product",
                 );
                 return JSON.stringify({
                   summary: `已生成图片「${result.artifact.title ?? input.title}」并放到画布。`,
@@ -642,7 +812,7 @@ export function createAgentTools(context: ToolContext) {
         context.bus.push({ type: "progress", progress: 12, stage: "提交给 Seedream" });
         try {
           const result = await generateImageWithVolces({
-            prompt: input.prompt,
+            prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
             referenceImages,
             signal: context.signal,
@@ -662,10 +832,11 @@ export function createAgentTools(context: ToolContext) {
             width: result.width,
             height: result.height,
             title: input.title,
-            prompt: input.prompt.slice(0, 2000),
+            prompt: prompt.slice(0, 2000),
             model: "Seedream 5.0 Lite",
             aspectRatio: input.aspectRatio,
             role,
+            ...(role === "canon" ? { anchorType: plan.anchorType ?? "product" } : {}),
             sourceAssetIds,
             ...(input.shotId ? { shotId: input.shotId } : {}),
           };
@@ -676,6 +847,7 @@ export function createAgentTools(context: ToolContext) {
             artifact,
             role,
             plan.storyboardId,
+            plan.anchorType ?? "product",
           );
 
           return JSON.stringify({
@@ -690,7 +862,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_image",
         description:
-          "生成一张图片。视频前期：role=canon 先做产品/角色设定图；role=keyframe/end_frame 用于镜头关键帧，必须基于已确认的 canon，服务端会自动把 canon 作为参考图。普通画图不传 role。",
+          "生成一张图片。视频前期：role=canon 先做锚图组（product 必需，character/scene/style 按需）；role=keyframe/end_frame 生成镜头首尾帧，服务端自动引用锚图、上一镜尾帧和当前首帧。普通画图不传 role。",
         schema: imageSchema,
       },
     ),
@@ -711,6 +883,7 @@ export function createAgentTools(context: ToolContext) {
           )
         ).slice(0, 2);
         let durationSeconds = input.durationSeconds ?? 8;
+        let videoPrompt = input.prompt;
         const sourceAssetIds = [...(input.inputImages ?? [])];
 
         if (input.shotId) {
@@ -746,6 +919,14 @@ export function createAgentTools(context: ToolContext) {
               }
             }
             if (frames.length > 0) referenceImages = frames.slice(0, 2);
+            const direction = [
+              found.shot.sceneGoal ? `镜头职责：${found.shot.sceneGoal}` : "",
+              found.shot.continuityNote ? `前后衔接：${found.shot.continuityNote}` : "",
+              found.shot.negativePrompt ? `不要出现：${found.shot.negativePrompt}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+            if (direction) videoPrompt = `${input.prompt}\n\n${direction}`;
           }
         }
 
@@ -757,7 +938,7 @@ export function createAgentTools(context: ToolContext) {
               type: "video_generation",
               ...(context.threadId ? { threadId: context.threadId } : {}),
               payload: {
-                prompt: input.prompt,
+                prompt: videoPrompt,
                 title: input.title,
                 aspectRatio: input.aspectRatio,
                 durationSeconds,
@@ -830,7 +1011,7 @@ export function createAgentTools(context: ToolContext) {
         context.bus.push({ type: "progress", progress: 8, stage: "提交任务" });
         try {
           const result = await generateVideoWithMetaso({
-            prompt: input.prompt,
+            prompt: videoPrompt,
             aspectRatio: input.aspectRatio as AspectRatio,
             durationSeconds,
             referenceImages,
@@ -853,7 +1034,7 @@ export function createAgentTools(context: ToolContext) {
             height: result.height,
             durationSeconds: result.durationSeconds,
             title: input.title,
-            prompt: input.prompt.slice(0, 2000),
+            prompt: videoPrompt.slice(0, 2000),
             model: "MiniMax H3",
             sourceAssetIds,
             ...(input.shotId ? { shotId: input.shotId } : {}),
@@ -1040,7 +1221,16 @@ export function createAgentTools(context: ToolContext) {
               status: detail.storyboard.status,
               active: detail.storyboard.active,
               ...(detail.storyboard.canonAssetId
-                ? { canon_asset_id: detail.storyboard.canonAssetId }
+                ? { product_anchor_asset_id: detail.storyboard.canonAssetId }
+                : {}),
+              ...(detail.storyboard.characterAnchorAssetId
+                ? { character_anchor_asset_id: detail.storyboard.characterAnchorAssetId }
+                : {}),
+              ...(detail.storyboard.sceneAnchorAssetId
+                ? { scene_anchor_asset_id: detail.storyboard.sceneAnchorAssetId }
+                : {}),
+              ...(detail.storyboard.styleAnchorAssetId
+                ? { style_anchor_asset_id: detail.storyboard.styleAnchorAssetId }
                 : {}),
               ...(detail.storyboard.totalDurationSeconds
                 ? { total_duration_seconds: detail.storyboard.totalDurationSeconds }
@@ -1060,6 +1250,9 @@ export function createAgentTools(context: ToolContext) {
               ...(shot.durationSeconds ? { duration_seconds: shot.durationSeconds } : {}),
               ...(shot.camera ? { camera: shot.camera } : {}),
               ...(shot.transition ? { transition: shot.transition } : {}),
+              ...(shot.sceneGoal ? { scene_goal: shot.sceneGoal } : {}),
+              ...(shot.continuityNote ? { continuity_note: shot.continuityNote } : {}),
+              ...(shot.negativePrompt ? { negative_prompt: shot.negativePrompt } : {}),
               ...(shot.activeAssetId ? { active_asset_id: shot.activeAssetId } : {}),
               ...(shot.firstFrameAssetId
                 ? { first_frame_asset_id: shot.firstFrameAssetId }

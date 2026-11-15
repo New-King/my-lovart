@@ -1,83 +1,98 @@
-# 视频前期：设定图、关键帧、镜头时长与一致性
+# 视频前期：锚图组、关键帧、镜头时长与连贯性
 
-> 状态：Phase 3a 已实现（多镜头拼接未实现）
+> 状态：Phase 3a/3b 已实现（多镜头拼接未实现）
 > 最后更新：2026-11-15
-> 关联：`docs/notes/M23.md`、`docs/specs/project-state-and-storyboard.md`
+> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/specs/project-state-and-storyboard.md`
 
 ## 问题
 
-用户要保温杯视频，模型直接建了 4 个镜头、分别文生图。4 张图里杯子形状/材质各不相同，看起来像 4 个不同产品。trace 显示每次 `generate_image` 只有 prompt 和 shotId，没有 `inputImages`，也没有共享的产品参考；分镜的 `active_asset_id` 还把图片和视频混在同一个指针里。
+用户要保温杯视频，模型直接建了 4 个镜头、分别文生图。4 张图里杯子形状/材质各不相同，看起来像 4 个不同产品。trace 显示每次 `generate_image` 只有 prompt 和 shotId，没有 `inputImages`，也没有共享参考；分镜的 `active_asset_id` 还把图片和视频混在同一个指针里。
 
 这不是“图片模型不稳定”，而是前期缺了三层：
 
-1. 没有产品/角色设定图（canon），每个镜头各自从文字重新发明产品；
-2. 没有区分“视觉设定 / 分镜关键帧 / 成片片段”，4 张图既不是连贯分镜，也不是视频输入；
+1. 没有产品/角色/场景/主视觉锚图，每个镜头各自从文字重新发明产品；
+2. 没有区分“执行锚图 / 分镜首尾帧 / 成片片段”，4 张图既不是连贯分镜，也不是视频输入；
 3. 没有时长预算：5 秒拆 4 段，每段 1-2 秒，低于视频 provider 单段最短 4 秒，根本不能逐段出片。
 
-## 对比 Lavart
+## 外部参考审计
 
-Lavart 仓库没有这套前期模型：
+**Lavart 仓库**没有这套前期模型：`video-generate.ts` 的 `inputImages` 最多 7 张，第一张作为首帧；前端提供首帧/尾帧上传；prompt 只有“视频 → generate_video”。没有 canon、storyboard、镜头时长或确认闸门，照抄解决不了产品一致性。
 
-- `apps/server/src/agent/tools/video-generate.ts` 的 `inputImages` 最多 7 张，第一张作为首帧，仅此而已；
-- `apps/web/src/components/canvas/video-generator-panel.tsx` 提供首帧/尾帧上传；
-- `apps/server/src/agent/prompts/loomic-main.ts` 只有“视频 → generate_video”，没有脚本、设定图、分镜或确认规则；
-- 没有任何 storyboard/shot/canon 数据表。
+**Video_Remix_Benlai** 的 `无限画布-生成视频对话参考.txt` 展示了正确的工作方式：以分镜图作为首帧逐镜生成、4 秒为最小单位、镜头逐条确认；但真正有价值的是它的制作级规格文档：
 
-所以照抄 Lavart 解决不了产品一致性。它把一致性交给用户上传和模型自觉；我们必须在服务端把“共享参考”变成硬约束。
+- 4 层产物：粗分镜 → 角色/场景/产品/主视觉锚图组（3-5 张）→ 细分镜 + prompt 包 → 执行前放行；
+- 一致性拆成三层：静态一致性（角色/产品/场景/色温）、镜头内一致性、段落连贯性；
+- 每镜必须有 `continuity_note`、`reference_bindings`、`must_have_elements`、`negative_elements`、`start_state/end_state`；
+- 下一段显式承接上一段最后一帧；上一镜末帧可能作为下一镜输入；
+- 锚图按 brief 动态规划，不固定每次都生成角色图；没有人物就不强加角色锚。
+
+它自己承认这套“锚图映射”是工程假设，不是参考网站已证实的公开规则；我们取它的结构和连贯性方法，不照搬固定模板。
 
 ## 三层产物
 
 | 层 | 角色 | 数量 | 是否进视频 | 生成方式 |
 | --- | --- | --- | --- | --- |
-| 产品/角色设定图 | `canon` | 整条片 1 张 | 否，只做参考 | 用户实拍图做参考，或文生图；确认后锁定 |
-| 分镜关键帧 | `keyframe` / `end_frame` | 每个镜头 1 张首帧，尾帧可选 | 首帧作为视频第一帧 | 必须引用 canon；相邻镜头可再加上一帧 |
-| 成片片段 | `video` | 每个镜头 1 条 | 最终交付 | `generate_video(shotId)`，首帧/时长由镜头锁定 |
+| 锚图组 | `canon` + `anchorType=product/character/scene/style` | 产品 1 张必需；其余按 brief 动态 0-3 张 | 否，只做参考 | 用户实拍图做参考或文生图；确认后锁定 |
+| 分镜首尾帧 | `keyframe` / `end_frame` | 每镜 1 张首帧；多镜头除收尾外必须有尾帧 | 首帧作为视频第一帧，尾帧作为最后一帧 | 自动引用锚图组 + 上一镜尾帧（首帧）或当前首帧（尾帧） |
+| 成片片段 | `video` | 每镜 1 条 | 最终交付 | `generate_video(shotId)`，首尾帧和时长由镜头锁定 |
 
-关键帧不是“每个镜头各自文生图”。`planImageReferences` 在生成关键帧时自动把该分镜的 canon URL 放到参考图第一位；生成结果记录 `metadata.role=keyframe` 和 `sourceAssetIds=[canon_id]`。出片前预检会校验这两个字段，手工塞一张图当首帧会被 `keyframe_not_anchored` 拒绝。
+`planImageReferences` 在生成关键帧时自动按 product → character → scene → style 顺序收集锚图 URL，并叠加上一镜尾帧；生成结果记录 `metadata.role` 与 `sourceAssetIds`。出片预检会校验首帧必须含产品锚图血缘、含上一镜尾帧（多镜头），手工塞图会被拒绝。
+
+## 连贯性方案
+
+静态一致性靠锚图组；段落连贯靠首尾帧链：
+
+1. 镜头 1 首帧基于锚图组生成；
+2. 镜头 1 尾帧基于锚图组 + 镜头 1 首帧生成；
+3. 镜头 2 首帧自动引用锚图组 + 镜头 1 尾帧；服务端强制 `sourceAssetIds` 包含上一镜尾帧；
+4. 镜头 2 尾帧基于锚图组 + 镜头 2 首帧；
+5. 视频 1 用镜头 1 首/尾帧，视频 2 用镜头 2 首/尾帧；剪辑点两端是同一画面状态；
+6. 非收尾镜头没有尾帧 → `end_frame_required`；下一镜首帧没承接上一镜尾帧 → `continuity_not_anchored`。
+
+MiniMax H3 支持首帧/尾帧图生视频，单段 4-15 秒，所以这个链路可以直接落地，不依赖拼接。
 
 ## 时长与镜头数
 
-视频 provider 单段最短 4 秒、最长 15 秒，所以镜头数必须由总时长反推：
-
-- 5 秒 → 1 个镜头（1 张首帧，可选 1 张尾帧），不是 4 张；
+- 5 秒 → 1 个镜头（1 张首帧，可选尾帧），不是 4 张；
 - 10 秒 → 最多 2 个镜头（建议 5+5）；
 - 15 秒 → 最多 3 个镜头（建议 5+5+5）；
-- 规则：每镜头 4-15 秒，合计必须等于总时长，镜头数 ≤ `floor(总时长 / 4)`。
+- 规则：每镜头 4-15 秒，合计等于总时长，镜头数 ≤ `floor(总时长 / 4)`。
 
-`create_storyboard(kind="video")` 会校验；5 秒拆 4 段直接报错。纯视觉分镜用 `kind="image"`，没有时长约束，但那只是概念图，不是可执行视频时间线。
+`create_storyboard(kind="video")` 会校验；5 秒拆 4 段直接报错。纯视觉分镜用 `kind="image"`，没有时长约束。
 
 ## 数据模型
 
-migration `0010_video_preproduction.sql`（已执行）：
+migration `0010` / `0011`（已执行）：
 
-- `storyboards.kind`：`image` / `video`
-- `storyboards.canon_asset_id`：设定图
-- `storyboards.total_duration_seconds`：成片总时长
+- `storyboards.kind`、`canon_asset_id`（产品锚）、`character_anchor_asset_id`、`scene_anchor_asset_id`、`style_anchor_asset_id`、`total_duration_seconds`
 - `storyboard_shots.first_frame_asset_id` / `end_frame_asset_id` / `video_asset_id`
+- `storyboard_shots.scene_goal` / `continuity_note` / `negative_prompt`
 
-旧的 `active_asset_id` 只保留兼容；新代码按角色写独立指针，避免“生成视频后把首帧指针覆盖掉”。
+旧 `active_asset_id` 只保留兼容；新代码按角色写独立指针。
 
 ## 流程
 
 1. 需求：平台/画幅、总时长、基调；问用户有没有产品实拍图。
-2. 脚本：按镜头列画面、运镜、节奏、字幕。
+2. 脚本：按镜头列画面、运镜、节奏、sceneGoal、continuityNote、negativePrompt。
 3. `create_storyboard({kind:"video", totalDurationSeconds, shots})`：只写文字时间线。
-4. `create_storyboard` 后生成 canon：`generate_image({role:"canon", storyboardId, inputImages:[产品图]})`；展示并确认。
-5. 逐镜头 `generate_image({shotId, role:"keyframe"})`：自动基于 canon；需要落点时加尾帧。
-6. 给用户看 canon + 脚本 + 镜头表 + 关键帧，停止。
-7. 下一轮确认后，逐镜头 `generate_video({shotId})`；首帧和时长由镜头锁定。
+4. 生成锚图组：`generate_image({role:"canon", anchorType:"product", storyboardId, inputImages:[产品图]})`；再按需生成 style/scene/character。
+5. 按镜头顺序生成首尾帧：`generate_image({shotId, role:"keyframe"})` → `generate_image({shotId, role:"end_frame"})`；服务端自动引用锚图与上一镜尾帧。
+6. 给用户看锚图组 + 脚本 + 镜头表 + 首尾帧，停止。
+7. 下一轮确认后逐镜 `generate_video({shotId})`；首尾帧和时长由镜头锁定。
 8. 多镜头全部完成后，才进入拼接成片。
 
 ## 仍未实现
 
 **多段视频拼接**。当前 `generate_video` 一条只生成一个镜头的 clip；10 秒 2 个镜头会得到 2 条 5 秒视频，还不会自动合成一条 10 秒成片。拼接需要 ffmpeg 或供应商合成能力，是下一步，不能在 UI/文案里假装已经完成。
 
+**按镜头绑定锚图**。当前锚图组对整个分镜生效；单场景产品片足够，多场景/多角色长片后续要支持“这一镜只引用场景 A + 产品锚”。这是已知粒度限制。
+
 ## 验收
 
-`apps/server/scripts/verify-video-guard.mjs`，12/12 通过，不调用图片/视频 provider：
+`apps/server/scripts/verify-video-guard.mjs`，17/17 通过，不调用图片/视频 provider：
 
 - 无 shotId → `video_plan_required`
-- 5 秒拆 4 镜头 → 校验拒绝
+- 5 秒拆 4 镜头 / 概念板直接转视频 → 校验拒绝
 - 本轮新建镜头 → `video_plan_unconfirmed`
 - 缺 canon → 关键帧/出片均 `canon_required`
 - 关键帧自动以 canon 为第一参考图
@@ -85,4 +100,8 @@ migration `0010_video_preproduction.sql`（已执行）：
 - 首帧没有 canon 血缘 → `keyframe_not_anchored`
 - 已确认 canon + 首帧 → 放行
 - 首帧本轮新出 → `keyframe_unconfirmed`
+- 多镜头首镜缺尾帧 → `end_frame_required`
+- 下一镜自动承接上一镜尾帧
+- 没承接尾帧的首帧 → `continuity_not_anchored`
+- 两镜首尾帧接通 → 放行
 - `direct=true` 显式跳过

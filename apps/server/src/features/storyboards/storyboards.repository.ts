@@ -79,6 +79,12 @@ export type StoryboardsRepository = {
     storyboardId: string,
     assetId: string | null,
   ): Promise<Storyboard>;
+  setAnchorAsset(
+    projectId: string,
+    storyboardId: string,
+    anchorType: "product" | "character" | "scene" | "style",
+    assetId: string | null,
+  ): Promise<Storyboard>;
   /** 生成作业完成后由 worker 调用；幂等 */
   applyFirstFrame(projectId: string, shotId: string, assetId: string): Promise<void>;
   applyEndFrame(projectId: string, shotId: string, assetId: string): Promise<void>;
@@ -99,6 +105,9 @@ type BoardRow = {
   aspect_ratio: string | null;
   style: string | null;
   canon_asset_id: string | null;
+  character_anchor_asset_id: string | null;
+  scene_anchor_asset_id: string | null;
+  style_anchor_asset_id: string | null;
   total_duration_seconds: number | null;
   status: StoryboardStatus;
   active: boolean;
@@ -117,6 +126,9 @@ type ShotRow = {
   duration_seconds: number | null;
   camera: string | null;
   transition: string | null;
+  scene_goal: string | null;
+  continuity_note: string | null;
+  negative_prompt: string | null;
   active_asset_id: string | null;
   first_frame_asset_id: string | null;
   end_frame_asset_id: string | null;
@@ -129,9 +141,9 @@ type ShotRow = {
 };
 
 const BOARD_COLUMNS =
-  "id, project_id, title, brief, kind, aspect_ratio, style, canon_asset_id, total_duration_seconds, status, active, metadata, created_at, updated_at";
+  "id, project_id, title, brief, kind, aspect_ratio, style, canon_asset_id, character_anchor_asset_id, scene_anchor_asset_id, style_anchor_asset_id, total_duration_seconds, status, active, metadata, created_at, updated_at";
 const SHOT_COLUMNS =
-  "id, storyboard_id, order_index, title, description, prompt, duration_seconds, camera, transition, active_asset_id, first_frame_asset_id, end_frame_asset_id, video_asset_id, status, metadata, deleted_at, created_at, updated_at";
+  "id, storyboard_id, order_index, title, description, prompt, duration_seconds, camera, transition, scene_goal, continuity_note, negative_prompt, active_asset_id, first_frame_asset_id, end_frame_asset_id, video_asset_id, status, metadata, deleted_at, created_at, updated_at";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -149,6 +161,11 @@ function toBoard(row: BoardRow): Storyboard {
     ...(row.aspect_ratio ? { aspectRatio: row.aspect_ratio } : {}),
     ...(row.style ? { style: row.style } : {}),
     ...(row.canon_asset_id ? { canonAssetId: row.canon_asset_id } : {}),
+    ...(row.character_anchor_asset_id
+      ? { characterAnchorAssetId: row.character_anchor_asset_id }
+      : {}),
+    ...(row.scene_anchor_asset_id ? { sceneAnchorAssetId: row.scene_anchor_asset_id } : {}),
+    ...(row.style_anchor_asset_id ? { styleAnchorAssetId: row.style_anchor_asset_id } : {}),
     ...(row.total_duration_seconds
       ? { totalDurationSeconds: Number(row.total_duration_seconds) }
       : {}),
@@ -171,6 +188,9 @@ function toShot(row: ShotRow): StoryboardShot {
     ...(row.duration_seconds ? { durationSeconds: Number(row.duration_seconds) } : {}),
     ...(row.camera ? { camera: row.camera } : {}),
     ...(row.transition ? { transition: row.transition } : {}),
+    ...(row.scene_goal ? { sceneGoal: row.scene_goal } : {}),
+    ...(row.continuity_note ? { continuityNote: row.continuity_note } : {}),
+    ...(row.negative_prompt ? { negativePrompt: row.negative_prompt } : {}),
     ...(row.active_asset_id ? { activeAssetId: row.active_asset_id } : {}),
     ...(row.first_frame_asset_id ? { firstFrameAssetId: row.first_frame_asset_id } : {}),
     ...(row.end_frame_asset_id ? { endFrameAssetId: row.end_frame_asset_id } : {}),
@@ -250,6 +270,9 @@ function shotPatch(patch: UpdateShotInput): Record<string, unknown> {
   if (patch.durationSeconds !== undefined) value.duration_seconds = patch.durationSeconds;
   if (patch.camera !== undefined) value.camera = patch.camera;
   if (patch.transition !== undefined) value.transition = patch.transition;
+  if (patch.sceneGoal !== undefined) value.scene_goal = patch.sceneGoal;
+  if (patch.continuityNote !== undefined) value.continuity_note = patch.continuityNote;
+  if (patch.negativePrompt !== undefined) value.negative_prompt = patch.negativePrompt;
   if (patch.status !== undefined) value.status = patch.status;
   return value;
 }
@@ -413,6 +436,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
           duration_seconds: shot.durationSeconds ?? null,
           camera: shot.camera ?? null,
           transition: shot.transition ?? null,
+          scene_goal: shot.sceneGoal ?? "",
+          continuity_note: shot.continuityNote ?? "",
+          negative_prompt: shot.negativePrompt ?? "",
           status: "draft",
         })),
       );
@@ -594,6 +620,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
           aspect_ratio: snapshot.storyboard.aspectRatio ?? null,
           style: snapshot.storyboard.style ?? null,
           canon_asset_id: snapshot.storyboard.canonAssetId ?? null,
+          character_anchor_asset_id: snapshot.storyboard.characterAnchorAssetId ?? null,
+          scene_anchor_asset_id: snapshot.storyboard.sceneAnchorAssetId ?? null,
+          style_anchor_asset_id: snapshot.storyboard.styleAnchorAssetId ?? null,
           total_duration_seconds: snapshot.storyboard.totalDurationSeconds ?? null,
           status: snapshot.storyboard.status,
           active: snapshot.storyboard.active,
@@ -626,6 +655,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
             duration_seconds: shot.durationSeconds ?? null,
             camera: shot.camera ?? null,
             transition: shot.transition ?? null,
+            scene_goal: shot.sceneGoal ?? "",
+            continuity_note: shot.continuityNote ?? "",
+            negative_prompt: shot.negativePrompt ?? "",
             active_asset_id: shot.activeAssetId ?? null,
             first_frame_asset_id: shot.firstFrameAssetId ?? null,
             end_frame_asset_id: shot.endFrameAssetId ?? null,
@@ -692,16 +724,28 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
     },
 
     async setCanonAsset(projectId, storyboardId, assetId) {
+      return this.setAnchorAsset(projectId, storyboardId, "product", assetId);
+    },
+
+    async setAnchorAsset(projectId, storyboardId, anchorType, assetId) {
       await requireBoard(projectId, storyboardId);
       if (assetId) {
         const asset = await (await getAssetsRepository()).get(projectId, assetId);
         if (!asset || asset.kind !== "image") {
-          throw new StoryboardValidationError("设定图必须是这个项目里的图片资产");
+          throw new StoryboardValidationError("锚图必须是这个项目里的图片资产");
         }
       }
+      const column =
+        anchorType === "product"
+          ? "canon_asset_id"
+          : anchorType === "character"
+            ? "character_anchor_asset_id"
+            : anchorType === "scene"
+              ? "scene_anchor_asset_id"
+              : "style_anchor_asset_id";
       const { data, error } = await db()
         .from("storyboards")
-        .update({ canon_asset_id: assetId, updated_at: new Date().toISOString() })
+        .update({ [column]: assetId, updated_at: new Date().toISOString() })
         .eq("id", storyboardId)
         .eq("project_id", projectId)
         .select(BOARD_COLUMNS)
@@ -857,6 +901,9 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
           ...(shot.durationSeconds ? { durationSeconds: shot.durationSeconds } : {}),
           ...(shot.camera ? { camera: shot.camera } : {}),
           ...(shot.transition ? { transition: shot.transition } : {}),
+          ...(shot.sceneGoal ? { sceneGoal: shot.sceneGoal } : {}),
+          ...(shot.continuityNote ? { continuityNote: shot.continuityNote } : {}),
+          ...(shot.negativePrompt ? { negativePrompt: shot.negativePrompt } : {}),
           status: "draft",
           metadata: {},
           createdAt: now,
@@ -1010,16 +1057,27 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       });
     },
     async setCanonAsset(projectId, storyboardId, assetId) {
+      return this.setAnchorAsset(projectId, storyboardId, "product", assetId);
+    },
+    async setAnchorAsset(projectId, storyboardId, anchorType, assetId) {
       const board = require(projectId, storyboardId);
       if (assetId) {
         const asset = await (await getAssetsRepository()).get(projectId, assetId);
         if (!asset || asset.kind !== "image") {
-          throw new StoryboardValidationError("设定图必须是这个项目里的图片资产");
+          throw new StoryboardValidationError("锚图必须是这个项目里的图片资产");
         }
       }
+      const key =
+        anchorType === "product"
+          ? "canonAssetId"
+          : anchorType === "character"
+            ? "characterAnchorAssetId"
+            : anchorType === "scene"
+              ? "sceneAnchorAssetId"
+              : "styleAnchorAssetId";
       board.detail.storyboard = {
         ...board.detail.storyboard,
-        canonAssetId: assetId ?? undefined,
+        [key]: assetId ?? undefined,
         updatedAt: new Date().toISOString(),
       };
       return board.detail.storyboard;
