@@ -29,6 +29,8 @@ export type WorkspaceData = {
   elements: unknown[];
   files?: Record<string, unknown>;
   messages: ChatMessage[];
+  /** 画布乐观锁版本；自动保存必须原样带回 */
+  canvasRevision?: number;
 };
 
 const base = process.env.NEXT_PUBLIC_SERVER_BASE_URL ?? "http://127.0.0.1:3001";
@@ -77,6 +79,25 @@ async function authToken(): Promise<string | null> {
   return token;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: string;
+  readonly code?: string;
+
+  constructor(method: string, path: string, status: number, body: string) {
+    super(`${method} ${path} ${status} ${body}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+    try {
+      const parsed = JSON.parse(body) as { code?: unknown };
+      if (typeof parsed.code === "string") this.code = parsed.code;
+    } catch {
+      // 非 JSON 错误体，保留原文
+    }
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await authToken();
   // 没有 body 的请求不能带 content-type: application/json，
@@ -94,7 +115,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${init?.method ?? "GET"} ${path} ${res.status} ${body}`);
+    throw new ApiError(init?.method ?? "GET", path, res.status, body);
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
@@ -181,10 +202,11 @@ export const saveCanvas = (
   projectId: string,
   elements: unknown[],
   files: Record<string, unknown>,
+  revision: number,
 ) =>
-  request<void>(`/workspace/${projectId}/canvas`, {
+  request<{ revision: number }>(`/workspace/${projectId}/canvas`, {
     method: "POST",
-    body: JSON.stringify({ elements, files }),
+    body: JSON.stringify({ elements, files, revision }),
   });
 
 export const getJob = (projectId: string, jobId: string) =>

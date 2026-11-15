@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 
 const TOOL_ICONS = {
   generate_image: ImagePlus,
@@ -94,15 +95,12 @@ function ToolRow({ tool, now }: { tool: ToolBlock; now: number }) {
         />
         <span className="shrink-0">{tool.title}</span>
         <span className="min-w-0 flex-1 truncate text-faint">· {tool.detail}</span>
-        {live ? (
+        {live && (
           <Loader2 className="size-3 shrink-0 animate-spin text-faint" strokeWidth={2} />
-        ) : (
-          <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-faint">
-            {tool.startedAt
-              ? formatDuration(tool.startedAt, tool.finishedAt, now)
-              : ""}
-          </span>
         )}
+        <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-faint">
+          {tool.startedAt ? formatDuration(tool.startedAt, tool.finishedAt, now) : ""}
+        </span>
         <ChevronDown
           className={`size-3 shrink-0 text-faint transition-transform ${
             expanded ? "" : "-rotate-90"
@@ -111,13 +109,33 @@ function ToolRow({ tool, now }: { tool: ToolBlock; now: number }) {
         />
       </button>
       {expanded && (
-        <p
-          className={`mb-2 ml-5 break-words text-[10.5px] leading-relaxed ${
-            failed ? "text-danger" : "text-faint"
-          }`}
-        >
-          {tool.detail || "—"}
-        </p>
+        <div className="mb-2 ml-5 space-y-1.5 text-[10.5px] leading-relaxed">
+          {tool.inputSummary || tool.detail ? (
+            <div>
+              <p className="text-[9.5px] text-faint">输入</p>
+              <p className="whitespace-pre-wrap break-words text-muted">
+                {tool.inputSummary || tool.detail}
+              </p>
+            </div>
+          ) : null}
+          {tool.outputSummary ? (
+            <div>
+              <p className="text-[9.5px] text-faint">输出</p>
+              <p className="whitespace-pre-wrap break-words text-muted">
+                {tool.outputSummary}
+              </p>
+            </div>
+          ) : null}
+          {tool.error ? (
+            <div>
+              <p className="text-[9.5px] text-danger/70">错误</p>
+              <p className="whitespace-pre-wrap break-words text-danger">{tool.error}</p>
+            </div>
+          ) : null}
+          {!tool.inputSummary && !tool.detail && !tool.outputSummary && !tool.error && (
+            <p className="text-faint">—</p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -141,11 +159,7 @@ export function RunProcess({ message }: { message: ChatMessage }) {
     return () => window.clearInterval(timer);
   }, [live]);
 
-  if (
-    thoughts.length === 0 &&
-    tools.length === 0 &&
-    message.status !== "queued"
-  ) {
+  if (!live && thoughts.length === 0 && tools.length === 0) {
     return null;
   }
 
@@ -168,7 +182,9 @@ export function RunProcess({ message }: { message: ChatMessage }) {
               ? `正在${runningTool.title}`
               : runningStep
                 ? `正在${runningStep.title}`
-                : "思考中"
+                : message.content
+                  ? "正在回答"
+                  : "思考中"
             : "思考过程";
 
   const total = formatDuration(
@@ -217,7 +233,7 @@ export function RunProcess({ message }: { message: ChatMessage }) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -3 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="truncate"
+            className={cn("truncate", live && "thinking-shimmer")}
           >
             {title}
           </motion.span>
@@ -244,7 +260,10 @@ export function RunProcess({ message }: { message: ChatMessage }) {
             <div className="mt-1.5 border-l border-line pl-3">
               {entries.length === 0 ? (
                 <p className="py-1 text-[10.5px] text-faint">
-                  {message.status === "queued" ? "正在排队，轮到时自动开始…" : "暂无过程记录"}
+                  {message.status === "queued" ? "正在排队，轮到时自动开始…"
+                    : live
+                      ? "正在理解需求…"
+                      : "暂无过程记录"}
                 </p>
               ) : (
                 entries.map((entry) =>

@@ -3,6 +3,7 @@ import pg from "pg";
 // @ts-ignore 可选依赖：未安装时运行时会走 disabled 分支
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { env } from "../../../lib/env.js";
+import { isCheckpointError } from "./checkpoint-errors.js";
 
 /**
  * LangGraph 执行记忆。
@@ -11,7 +12,7 @@ import { env } from "../../../lib/env.js";
  */
 
 const SCHEMA = "langgraph";
-const POOL_MAX = 3;
+const POOL_MAX = 5;
 
 export type CheckpointerStatus = {
   status: "idle" | "ready" | "disabled" | "error";
@@ -111,15 +112,59 @@ async function initCheckpointer(): Promise<PostgresSaver | null> {
   return null;
 }
 
+const RETRYABLE_METHODS = new Set(["put", "putWrites", "getTuple", "list"]);
+const RETRY_DELAYS_MS = [400, 1_200];
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Supabase pooler 偶尔会掐掉空闲连接。LangGraph 在每轮末尾 putWrites，
+ * 失败会让已经出图的运行变成 agent_error。这里对读写做两次短重试；
+ * 仍然失败时由 runtime 降级处理，而不是把整轮判死。
+ */
+function withCheckpointRetry(saver: PostgresSaver): PostgresSaver {
+  return new Proxy(saver, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      const bound = value.bind(target) as (...args: unknown[]) => Promise<unknown>;
+      if (!RETRYABLE_METHODS.has(String(property))) return bound;
+
+      return async (...args: unknown[]) => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+          try {
+            return await bound(...args);
+          } catch (err) {
+            lastError = err;
+            if (!isCheckpointError(err) || attempt === RETRY_DELAYS_MS.length) break;
+            const delay = RETRY_DELAYS_MS[attempt] ?? 1_000;
+            console.warn(
+              `[checkpointer] ${String(property)} 失败，${delay}ms 后重试：`,
+              err instanceof Error ? err.message : err,
+            );
+            await sleep(delay);
+          }
+        }
+        throw lastError;
+      };
+    },
+  }) as unknown as PostgresSaver;
+}
+
 export function getCheckpointer(): Promise<PostgresSaver | null> {
   if (!checkpointerPromise) {
-    checkpointerPromise = initCheckpointer().catch((err) => {
-      status = {
-        status: "error",
-        detail: err instanceof Error ? err.message : String(err),
-      };
-      return null;
-    });
+    checkpointerPromise = initCheckpointer()
+      .then((saver) => (saver ? withCheckpointRetry(saver) : null))
+      .catch((err) => {
+        status = {
+          status: "error",
+          detail: err instanceof Error ? err.message : String(err),
+        };
+        return null;
+      });
   }
   return checkpointerPromise;
 }

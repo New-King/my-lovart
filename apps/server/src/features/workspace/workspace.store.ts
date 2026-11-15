@@ -17,6 +17,8 @@ export type Workspace = {
   elements: unknown[];
   files: Record<string, unknown>;
   messages: ChatMessage[];
+  /** 画布乐观锁版本；服务端生成作业和前端自动保存都靠它串行化 */
+  canvasRevision: number;
 };
 
 const workspaces = new Map<string, Workspace>();
@@ -24,7 +26,7 @@ const workspaces = new Map<string, Workspace>();
 export function ensureWorkspace(projectId: string): Workspace {
   let ws = workspaces.get(projectId);
   if (!ws) {
-    ws = { projectId, elements: [], files: {}, messages: [] };
+    ws = { projectId, elements: [], files: {}, messages: [], canvasRevision: 0 };
     workspaces.set(projectId, ws);
   }
   if (!ws.files) ws.files = {};
@@ -42,12 +44,13 @@ export function hasWorkspace(projectId: string): boolean {
 /** 从持久层灌回内存；之后流式事件仍然操作同一份缓存 */
 export function hydrateWorkspace(
   projectId: string,
-  data: Pick<Workspace, "elements" | "files" | "messages">,
+  data: Pick<Workspace, "elements" | "files" | "messages" | "canvasRevision">,
 ): Workspace {
   const ws = ensureWorkspace(projectId);
   ws.elements = data.elements;
   ws.files = data.files;
   ws.messages = data.messages;
+  ws.canvasRevision = data.canvasRevision;
   return ws;
 }
 
@@ -55,11 +58,30 @@ export function saveElements(
   projectId: string,
   elements: unknown[],
   files?: Record<string, unknown>,
+  revision?: number,
 ): Workspace {
   const ws = ensureWorkspace(projectId);
   ws.elements = elements;
   if (files) ws.files = files;
+  if (revision !== undefined) ws.canvasRevision = revision;
   return ws;
+}
+
+/**
+ * 服务端作业直接写了画布后，把内存缓存一起更新；
+ * 否则下一轮 Agent 的 <canvas_state> 和 inspect_canvas 会看到旧场景。
+ */
+export function replaceCanvas(
+  projectId: string,
+  elements: unknown[],
+  files: Record<string, unknown>,
+  revision: number,
+): void {
+  const ws = workspaces.get(projectId);
+  if (!ws) return;
+  ws.elements = elements;
+  ws.files = files;
+  ws.canvasRevision = revision;
 }
 
 export function appendMessage(
@@ -283,7 +305,7 @@ export function updateToolStatus(
   messageId: string,
   toolCallId: string,
   status: ToolBlock["status"],
-  detail: string | undefined,
+  text: string | undefined,
   at: string,
 ): void {
   const message = findMessage(projectId, messageId);
@@ -292,7 +314,11 @@ export function updateToolStatus(
   );
   if (!message || !tool) return;
   tool.status = status;
-  if (detail !== undefined) tool.detail = detail;
+  if (text !== undefined) {
+    if (status === "done") tool.outputSummary = text;
+    else if (status === "failed") tool.error = text;
+    else tool.detail = text;
+  }
   if (status === "done") tool.progress = 100;
   if (status === "done" || status === "failed") tool.finishedAt = at;
   touch(message, at);

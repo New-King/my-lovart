@@ -6,6 +6,7 @@ import type {
   ImageBlock,
   RunError,
   RunEvent,
+  ToolName,
   VideoBlock,
 } from "@my-lovart/shared";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
@@ -17,6 +18,7 @@ import type { Trace } from "../../lib/trace.js";
 import type { ProjectAsset } from "../assets/assets.js";
 import { AgentEventBus } from "./bus.js";
 import { buildAttachmentContext, buildCanvasContext, buildProjectAssetsContext } from "./context.js";
+import { isCheckpointError } from "./persistence/checkpoint-errors.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { createAgentTools } from "./tools.js";
 
@@ -40,6 +42,8 @@ export type AgentRunInput = {
   /** LangGraph checkpointer；有它时不再手工拼 history，避免重复 */
   checkpointer?: NonNullable<Parameters<typeof createDeepAgent>[0]>["checkpointer"];
   threadId?: string;
+  /** checkpoint 损坏/写不进去时，轮换 thread 并下次用产品历史重建 */
+  onCheckpointUnavailable?: (threadId: string) => void | Promise<void>;
   trace?: Trace;
 };
 
@@ -51,6 +55,128 @@ type RawStreamEvent = {
   run_id?: string;
   data?: Record<string, unknown>;
 };
+
+const KNOWN_TOOLS: ToolName[] = [
+  "generate_image",
+  "generate_video",
+  "manipulate_canvas",
+  "inspect_canvas",
+  "offer_choices",
+  "list_assets",
+  "get_asset",
+  "search_inspiration",
+];
+
+function isKnownTool(name: string): name is ToolName {
+  return (KNOWN_TOOLS as string[]).includes(name);
+}
+
+function clip(value: unknown, max = 500): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
+type ToolStartMeta = {
+  title: string;
+  detail?: string;
+  inputSummary?: string;
+  aspectRatio?: AspectRatio;
+};
+
+function toolStartMeta(
+  name: string,
+  args: Record<string, unknown> | null,
+): ToolStartMeta | null {
+  const prompt = clip(args?.prompt, 500);
+  switch (name) {
+    case "generate_image":
+    case "generate_video": {
+      const aspect = typeof args?.aspectRatio === "string" ? args.aspectRatio : undefined;
+      const refs = Array.isArray(args?.referenceImages) ? args.referenceImages.length : 0;
+      return {
+        title: name === "generate_video" ? "渲染视频" : "生成图像",
+        ...(prompt ? { detail: clip(prompt, 90) } : {}),
+        ...(prompt || aspect || refs
+          ? {
+              inputSummary: [
+                prompt ? `提示词：${prompt}` : undefined,
+                aspect ? `比例：${aspect}` : undefined,
+                refs > 0 ? `参考图：${refs} 张` : undefined,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            }
+          : {}),
+        ...(aspect ? { aspectRatio: aspect as AspectRatio } : {}),
+      };
+    }
+    case "manipulate_canvas": {
+      const summary = clip(args?.summary, 200);
+      const actions = Array.isArray(args?.actions) ? args.actions.length : 0;
+      return {
+        title: "调整画布",
+        ...(summary ? { detail: clip(summary, 90) } : {}),
+        inputSummary: [summary, actions > 0 ? `${actions} 个动作` : undefined]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
+    case "offer_choices": {
+      const questions = Array.isArray(args?.questions) ? args.questions : [];
+      const titles = questions
+        .map((item) => (asRecord(item)?.question as string | undefined) ?? "")
+        .filter(Boolean);
+      return {
+        title: "整理问题",
+        detail: `${questions.length} 个问题`,
+        ...(titles.length > 0 ? { inputSummary: titles.join("\n") } : {}),
+      };
+    }
+    case "list_assets": {
+      const query = clip(args?.query, 80);
+      const kind = clip(args?.kind, 20);
+      return {
+        title: "查找项目资产",
+        detail: query ? `搜索「${query}」` : kind ? `筛选 ${kind}` : "最近资产",
+        ...(args
+          ? {
+              inputSummary: `查询：${query ?? "全部"}${kind ? `\n类型：${kind}` : ""}`,
+            }
+          : {}),
+      };
+    }
+    case "get_asset":
+      return {
+        title: "读取资产",
+        detail: clip(args?.assetId, 40) ?? "",
+        ...(clip(args?.assetId)
+          ? { inputSummary: `资产 id：${clip(args?.assetId, 80)}` }
+          : {}),
+      };
+    case "inspect_canvas":
+      return {
+        title: "查看画布",
+        detail: "读取元素与位置",
+        inputSummary: "读取当前场景的元素、位置和尺寸",
+      };
+    default:
+      return null;
+  }
+}
+
+function toolResultSummary(name: string, parsed: Record<string, unknown> | null): string | undefined {
+  const summary = clip(parsed?.summary, 300);
+  if (summary) return summary;
+  if (name === "get_asset") {
+    const asset = asRecord(parsed?.asset);
+    const title = clip(asset?.title, 80);
+    if (title) return `读取「${title}」`;
+  }
+  if (name === "inspect_canvas") return "已读取画布";
+  return undefined;
+}
 
 export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> {
   let seq = 0;
@@ -175,6 +301,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   });
 
   let answerText = "";
+  let deliveredArtifact = false;
   let activeTool: { toolCallId: string } | null = null;
 
   try {
@@ -227,47 +354,29 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       if (event.event === "on_tool_start") {
         const name = event.name ?? "";
         input.trace?.event("tool.start", { name, input: event.data?.input });
-
-        if (name === "manipulate_canvas") {
-          const toolCallId = event.run_id ?? randomUUID();
-          const args = asRecord(event.data?.input);
-          activeTool = { toolCallId };
-          yield emit({
-            type: "tool.started",
-            tool: {
-              id: toolCallId,
-              type: "tool",
-              tool: "manipulate_canvas",
-              status: "running",
-              title: "调整画布",
-              detail:
-                typeof args?.summary === "string" ? args.summary.slice(0, 100) : undefined,
-              startedAt: new Date().toISOString(),
-            },
-          });
-          continue;
-        }
-
-        if (name !== "generate_image" && name !== "generate_video") continue;
+        if (!isKnownTool(name)) continue;
 
         const toolCallId = event.run_id ?? randomUUID();
         const args = asRecord(event.data?.input);
-        const toolName = name === "generate_video" ? "generate_video" : "generate_image";
-        activeTool = { toolCallId };
+        const meta = toolStartMeta(name, args);
+        if (!meta) continue;
+
+        if (name === "generate_image" || name === "generate_video" || name === "manipulate_canvas") {
+          activeTool = { toolCallId };
+        }
 
         yield emit({
           type: "tool.started",
           tool: {
             id: toolCallId,
             type: "tool",
-            tool: toolName,
+            tool: name,
             status: "running",
-            title: toolName === "generate_video" ? "渲染视频" : "生成图像",
-            detail: typeof args?.prompt === "string" ? args.prompt.slice(0, 100) : undefined,
+            title: meta.title,
+            ...(meta.detail ? { detail: meta.detail } : {}),
+            ...(meta.inputSummary ? { inputSummary: meta.inputSummary } : {}),
             startedAt: new Date().toISOString(),
-            ...(typeof args?.aspectRatio === "string"
-              ? { aspectRatio: args.aspectRatio as AspectRatio }
-              : {}),
+            ...(meta.aspectRatio ? { aspectRatio: meta.aspectRatio } : {}),
           },
         });
         continue;
@@ -276,6 +385,8 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       if (event.event === "on_tool_end") {
         const name = event.name ?? "";
         input.trace?.event("tool.end", { name, output: event.data?.output });
+        if (!isKnownTool(name)) continue;
+        const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
 
         if (name === "offer_choices") {
           const parsed = parseToolOutput(event.data?.output);
@@ -292,11 +403,16 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
           if (questions.length > 0) {
             yield emit({ type: "message.questions", questions });
           }
+          yield emit({
+            type: "tool.completed",
+            toolCallId,
+            outputSummary:
+              questions.length > 0 ? `${questions.length} 个问题` : "没有生成问题",
+          });
           continue;
         }
 
         if (name === "manipulate_canvas") {
-          const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
           activeTool = null;
           const parsed = parseToolOutput(event.data?.output);
 
@@ -341,15 +457,36 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
           continue;
         }
 
-        if (name !== "generate_image" && name !== "generate_video") continue;
+        if (name !== "generate_image" && name !== "generate_video") {
+          const parsed = parseToolOutput(event.data?.output);
+          if (parsed?.error) {
+            yield emit({
+              type: "tool.failed",
+              toolCallId,
+              error: {
+                code: typeof parsed.code === "string" ? parsed.code : "tool_error",
+                message: parsed.error,
+                retriable: true,
+              },
+            });
+          } else {
+            yield emit({
+              type: "tool.completed",
+              toolCallId,
+              outputSummary:
+                toolResultSummary(name, parsed as Record<string, unknown> | null) ??
+                "完成",
+            });
+          }
+          continue;
+        }
 
-        const toolCallId = event.run_id ?? activeTool?.toolCallId;
         activeTool = null;
-        if (!toolCallId) continue;
 
         const parsed = parseToolOutput(event.data?.output);
         if (parsed?.artifact) {
           const artifact = { ...parsed.artifact, batchId: toolCallId } as ImageBlock | VideoBlock;
+          deliveredArtifact = true;
           yield emit({ type: "artifact.ready", artifact });
           yield emit({
             type: "tool.completed",
@@ -384,13 +521,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       if (event.event === "on_tool_error") {
         const name = event.name ?? "";
         input.trace?.event("tool.error", { name, error: event.data?.error });
-        if (
-          name !== "generate_image" &&
-          name !== "generate_video" &&
-          name !== "manipulate_canvas"
-        ) {
-          continue;
-        }
+        if (!isKnownTool(name)) continue;
 
         const toolCallId = event.run_id ?? activeTool?.toolCallId ?? randomUUID();
         activeTool = null;
@@ -420,8 +551,35 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
       return;
     }
 
+    const checkpointFailure = checkpointEnabled && isCheckpointError(error);
+    if (checkpointFailure) {
+      input.trace?.event("checkpoint.write_failed", {
+        message: errorMessage(error),
+        answerChars: answerText.length,
+        deliveredArtifact,
+        threadId: input.threadId,
+      });
+      if (input.threadId) {
+        try {
+          await input.onCheckpointUnavailable?.(input.threadId);
+        } catch (resetError) {
+          console.warn(
+            "[agent] checkpoint 轮换失败：",
+            resetError instanceof Error ? resetError.message : resetError,
+          );
+        }
+      }
+
+      // 图片已经交付、或文字已经回答完，不能因为执行记忆写不进去就报失败。
+      // 下一轮没有可用 checkpoint 时会自动用产品消息历史重建。
+      if (answerText.trim().length > 0 || deliveredArtifact) {
+        yield emit({ type: "run.completed" });
+        return;
+      }
+    }
+
     const runError: RunError = {
-      code: "agent_error",
+      code: checkpointFailure ? "checkpoint_error" : "agent_error",
       message: errorMessage(error),
       retriable: true,
     };

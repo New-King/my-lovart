@@ -34,7 +34,7 @@ import {
   parseChatImageDragData,
   type ChatImageDragPayload,
 } from "@/lib/chat-canvas-drag";
-import type { Project } from "@/lib/api";
+import type { Project, WorkspaceData } from "@/lib/api";
 import { getWorkspace } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useToast } from "./ui/toast";
@@ -72,7 +72,10 @@ export type CanvasStageHandle = {
     silent?: boolean;
   }) => Promise<void>;
   /** 服务端作业/其他客户端改了画布后，重新拉取并应用 */
-  syncFromServer: () => Promise<void>;
+  syncFromServer: (options?: {
+    workspace?: WorkspaceData;
+    focusElementId?: string;
+  }) => Promise<void>;
   /** 执行 Agent 下发的画布动作（移动 / 对齐 / 删除…） */
   applyCommands: (commands: CanvasCommand[]) => CanvasCommandResult;
 };
@@ -372,20 +375,47 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           };
         }
       },
-      async syncFromServer() {
+      async syncFromServer(options) {
         if (!project) return;
         const api = apiRef.current;
         if (!api) return;
-        const workspace = await getWorkspace(project.id);
+
+        let workspace = options?.workspace;
+        if (!workspace) {
+          let lastError: unknown;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              workspace = await getWorkspace(project.id);
+              lastError = undefined;
+              break;
+            } catch (err) {
+              lastError = err;
+              if (attempt === 0) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+            }
+          }
+          if (!workspace) throw lastError ?? new Error("画布同步失败");
+        }
+
         const files = Object.values(workspace.files ?? {}) as BinaryFileData[];
         if (files.length > 0) api.addFiles(files);
         api.updateScene({
           elements: workspace.elements as never[],
           captureUpdate: "IMMEDIATELY",
         });
+
+        const focusId = options?.focusElementId;
+        if (focusId) {
+          const target = api.getSceneElements().find((element) => element.id === focusId);
+          if (target) {
+            api.scrollToContent(target, { fitToContent: true, animate: true });
+          }
+        }
+        updateVisibility(api);
       },
     }),
-    [addChatImage, project],
+    [addChatImage, project, updateVisibility],
   );
 
   const addFiles = useCallback(

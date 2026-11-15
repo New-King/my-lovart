@@ -13,6 +13,7 @@ import {
   normalizeAttachments,
 } from "../features/workspace/workspace.service.js";
 import type { ProjectsRepository } from "../features/projects/projects.repository.js";
+import { CanvasConflictError } from "../features/workspace/workspace.repository.js";
 
 type Params = { projectId: string };
 
@@ -118,25 +119,32 @@ export function registerWorkspaceRoutes(
     return service.get(request.params.projectId);
   });
 
-  app.post<{ Params: Params; Body: { elements?: unknown; files?: unknown } }>(
-    "/workspace/:projectId/canvas",
-    async (request, reply) => {
-      if (!(await ownProject(request, reply, request.params.projectId))) return;
-      try {
-        await service.saveCanvas(
-          request.params.projectId,
-          request.body?.elements ?? [],
-          request.body?.files,
-        );
-        return reply.code(204).send();
-      } catch (err) {
-        if (err instanceof WorkspaceInputError) {
-          return reply.code(400).send({ error: err.message });
-        }
-        throw err;
+  app.post<{
+    Params: Params;
+    Body: { elements?: unknown; files?: unknown; revision?: unknown };
+  }>("/workspace/:projectId/canvas", async (request, reply) => {
+    if (!(await ownProject(request, reply, request.params.projectId))) return;
+    try {
+      const revision = Number(request.body?.revision ?? 0);
+      const workspace = await service.saveCanvas(
+        request.params.projectId,
+        request.body?.elements ?? [],
+        request.body?.files,
+        Number.isFinite(revision) ? revision : 0,
+      );
+      return reply.code(200).send({ revision: workspace.canvasRevision });
+    } catch (err) {
+      if (err instanceof CanvasConflictError) {
+        return reply
+          .code(409)
+          .send({ error: err.message, code: "canvas_conflict" });
       }
-    },
-  );
+      if (err instanceof WorkspaceInputError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
 
   /** 发送一条消息并开始一次运行，响应是 SSE。 */
   app.post<{ Params: Params; Body: MessageBody }>(

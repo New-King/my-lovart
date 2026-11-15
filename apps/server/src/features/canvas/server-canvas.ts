@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { fileDataUrlFromUrl } from "../files/file.store.js";
-import { getWorkspaceRepository } from "../workspace/workspace.repository.js";
+import {
+  CanvasConflictError,
+  getWorkspaceRepository,
+} from "../workspace/workspace.repository.js";
+import { replaceCanvas } from "../workspace/workspace.store.js";
 
 type CanvasElement = Record<string, unknown>;
 
@@ -130,28 +134,43 @@ export async function insertImageOnCanvas(
     const repo = await getWorkspaceRepository();
     if (!repo) return null;
 
-    const snapshot = await repo.load(input.projectId);
     const dataURL = await fileDataUrlFromUrl(input.url);
     if (!dataURL) throw new Error("图片文件读不出来，无法上画布");
 
-    const elements = [...snapshot.elements] as CanvasElement[];
-    const files = { ...snapshot.files };
-    const size = fit(input.width, input.height);
-    const placement = calculatePlacement(elements, size.width, size.height);
-    const fileId = input.assetId;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = await repo.loadCanvas(input.projectId);
+      const elements = [...snapshot.elements] as CanvasElement[];
+      const files = { ...snapshot.files };
+      const size = fit(input.width, input.height);
+      const placement = calculatePlacement(elements, size.width, size.height);
+      const fileId = input.assetId;
 
-    files[fileId] = {
-      id: fileId,
-      mimeType: input.mimeType,
-      dataURL,
-      created: Date.now(),
-      lastRetrieved: Date.now(),
-    };
+      files[fileId] = {
+        id: fileId,
+        mimeType: input.mimeType,
+        dataURL,
+        created: Date.now(),
+        lastRetrieved: Date.now(),
+      };
 
-    const element = buildImageElement(fileId, placement, input);
-    elements.push(element);
-    await repo.saveCanvas(input.projectId, elements, files);
+      const element = buildImageElement(fileId, placement, input);
+      elements.push(element);
+      try {
+        const revision = await repo.saveCanvas(
+          input.projectId,
+          elements,
+          files,
+          snapshot.canvasRevision,
+        );
+        // 内存缓存和 DB 必须一起前进，否则下一轮 Agent 仍会看到空画布
+        replaceCanvas(input.projectId, elements, files, revision);
+        return { elementId: String(element.id), placement };
+      } catch (err) {
+        if (!(err instanceof CanvasConflictError) || attempt > 0) throw err;
+        console.warn("[canvas] 画布刚被前端更新，重新计算位置后再插入");
+      }
+    }
 
-    return { elementId: String(element.id), placement };
+    throw new CanvasConflictError();
   });
 }

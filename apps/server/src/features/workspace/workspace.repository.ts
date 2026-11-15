@@ -14,14 +14,40 @@ import { env } from "../../lib/env.js";
 import { hydrateCanvasFiles, persistCanvasFiles } from "./canvas-file-store.js";
 import type { Workspace } from "./workspace.store.js";
 
-export type WorkspaceSnapshot = Pick<Workspace, "elements" | "files" | "messages">;
+export type WorkspaceSnapshot = Pick<
+  Workspace,
+  "elements" | "files" | "messages" | "canvasRevision"
+>;
+
+export class CanvasConflictError extends Error {
+  constructor() {
+    super("画布已在别处更新");
+    this.name = "CanvasConflictError";
+  }
+}
+
+export type CanvasSnapshot = {
+  elements: unknown[];
+  files: Record<string, unknown>;
+  canvasRevision: number;
+};
 
 export type WorkspaceRepository = {
   load(projectId: string): Promise<WorkspaceSnapshot>;
-  saveCanvas(projectId: string, elements: unknown[], files: Record<string, unknown>): Promise<void>;
+  /** 只读画布，不加载消息；跨进程刷新和 worker 插画布用 */
+  loadCanvas(projectId: string): Promise<CanvasSnapshot>;
+  /** 成功时返回新 revision；expectedRevision 对不上抛 CanvasConflictError */
+  saveCanvas(
+    projectId: string,
+    elements: unknown[],
+    files: Record<string, unknown>,
+    expectedRevision: number,
+  ): Promise<number>;
   saveMessage(projectId: string, message: ChatMessage): Promise<void>;
   /** 该 project 的 LangGraph thread_id；没有就创建并写回 sessions */
   getThreadId(projectId: string): Promise<string>;
+  /** checkpoint 损坏后换一条新 thread，旧 thread 由调用方清理 */
+  resetThreadId(projectId: string): Promise<string>;
 };
 
 type MessageRow = {
@@ -112,28 +138,28 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
   async function ensureCanvas(projectId: string) {
     const { data, error } = await db()
       .from("canvases")
-      .select("id, elements, files")
+      .select("id, elements, files, revision")
       .eq("project_id", projectId)
       .maybeSingle();
     if (error) throw error;
-    if (data) return data as { id: string; elements: unknown; files: unknown };
+    if (data) return data as { id: string; elements: unknown; files: unknown; revision: number };
 
     const inserted = await db()
       .from("canvases")
-      .insert({ project_id: projectId, elements: [], files: {} })
-      .select("id, elements, files")
+      .insert({ project_id: projectId, elements: [], files: {}, revision: 0 })
+      .select("id, elements, files, revision")
       .single();
     if (!inserted.error && inserted.data) {
-      return inserted.data as { id: string; elements: unknown; files: unknown };
+      return inserted.data as { id: string; elements: unknown; files: unknown; revision: number };
     }
     if (inserted.error?.code === "23505") {
       const retry = await db()
         .from("canvases")
-        .select("id, elements, files")
+        .select("id, elements, files, revision")
         .eq("project_id", projectId)
         .maybeSingle();
       if (!retry.error && retry.data) {
-        return retry.data as { id: string; elements: unknown; files: unknown };
+        return retry.data as { id: string; elements: unknown; files: unknown; revision: number };
       }
     }
     throw inserted.error ?? new Error("无法创建画布");
@@ -162,11 +188,28 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
         messages: ((data ?? []) as MessageRow[])
           .map(toMessage)
           .filter((message): message is ChatMessage => message !== null),
+        canvasRevision: Number(canvas.revision ?? 0),
       };
     },
 
-    async saveCanvas(projectId, elements, files) {
+    async loadCanvas(projectId) {
       const canvas = await ensureCanvas(projectId);
+      return {
+        elements: Array.isArray(canvas.elements) ? (canvas.elements as unknown[]) : [],
+        files: await hydrateCanvasFiles(
+          typeof canvas.files === "object" && canvas.files !== null && !Array.isArray(canvas.files)
+            ? (canvas.files as Record<string, unknown>)
+            : {},
+        ),
+        canvasRevision: Number(canvas.revision ?? 0),
+      };
+    },
+
+    async saveCanvas(projectId, elements, files, expectedRevision) {
+      const canvas = await ensureCanvas(projectId);
+      const currentRevision = Number(canvas.revision ?? 0);
+      if (expectedRevision !== currentRevision) throw new CanvasConflictError();
+
       const manifest = await persistCanvasFiles(
         projectId,
         files,
@@ -174,11 +217,22 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
           ? (canvas.files as Record<string, unknown>)
           : {},
       );
-      const { error } = await db()
+      const nextRevision = currentRevision + 1;
+      const { data, error } = await db()
         .from("canvases")
-        .update({ elements, files: manifest, updated_at: new Date().toISOString() })
-        .eq("id", canvas.id);
+        .update({
+          elements,
+          files: manifest,
+          revision: nextRevision,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", canvas.id)
+        .eq("revision", expectedRevision)
+        .select("revision")
+        .maybeSingle();
       if (error) throw error;
+      if (!data) throw new CanvasConflictError();
+      return Number(data.revision);
     },
 
     async getThreadId(projectId) {
@@ -197,6 +251,17 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
         .update({ thread_id: threadId })
         .eq("id", sessionId);
       if (updateError) throw updateError;
+      return threadId;
+    },
+
+    async resetThreadId(projectId) {
+      const sessionId = await ensureSession(projectId);
+      const threadId = `thread_${randomUUID()}`;
+      const { error } = await db()
+        .from("sessions")
+        .update({ thread_id: threadId })
+        .eq("id", sessionId);
+      if (error) throw error;
       return threadId;
     },
 

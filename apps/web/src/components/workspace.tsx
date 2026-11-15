@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/auth";
 import {
+  ApiError,
   autoNameProject,
   createProject,
   deleteProject,
@@ -198,7 +199,7 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
                 progress: 100,
                 finishedAt: at,
                 ...(event.outputSummary !== undefined
-                  ? { detail: event.outputSummary }
+                  ? { outputSummary: event.outputSummary }
                   : {}),
               }
             : block,
@@ -210,7 +211,7 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
         updatedAt: at,
         blocks: (message.blocks ?? []).map((block) =>
           block.type === "tool" && block.id === event.toolCallId
-            ? { ...block, status: "failed" as const, detail: event.error.message, finishedAt: at }
+            ? { ...block, status: "failed" as const, error: event.error.message, finishedAt: at }
             : block,
         ),
       }));
@@ -268,8 +269,13 @@ export function Workspace() {
   const skipLoadFor = useRef<string | null>(null);
   const chatComposerRef = useRef<ChatComposerHandle>(null);
   const canvasRef = useRef<CanvasStageHandle>(null);
+  const canvasRevisionRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const lastRunRef = useRef<LastRun | null>(null);
+
+  useEffect(() => {
+    canvasRevisionRef.current = data?.canvasRevision ?? 0;
+  }, [data?.canvasRevision]);
 
   const refreshProjects = useCallback(async () => {
     const list = await listProjects().catch(() => null);
@@ -298,6 +304,7 @@ export function Workspace() {
     getWorkspace(activeId)
       .then((next) => {
         if (!cancelled) {
+          canvasRevisionRef.current = next.canvasRevision ?? 0;
           setData(next);
           setLoadingProject(false);
         }
@@ -326,13 +333,39 @@ export function Workspace() {
       setLoadingError(null);
       skipLoadFor.current = created.id;
       setActiveId(created.id);
+      canvasRevisionRef.current = 0;
       setData((prev) => ({
         projectId: created.id,
         elements: prev?.elements ?? [],
         files: prev?.files ?? {},
         messages: prev?.messages ?? [],
+        canvasRevision: 0,
       }));
       return created.id;
+    },
+    [activeId],
+  );
+
+  const refreshCanvasFromServer = useCallback(
+    async (focusElementId?: string, projectIdOverride?: string) => {
+      const projectId = projectIdOverride ?? activeId;
+      if (!projectId || projectId.startsWith(DRAFT_PREFIX)) return;
+      const workspace = await getWorkspace(projectId);
+      canvasRevisionRef.current = workspace.canvasRevision ?? 0;
+      setData((prev) =>
+        prev && prev.projectId === projectId
+          ? {
+              ...prev,
+              elements: workspace.elements,
+              files: workspace.files ?? {},
+              canvasRevision: workspace.canvasRevision ?? 0,
+            }
+          : prev,
+      );
+      await canvasRef.current?.syncFromServer({
+        workspace,
+        ...(focusElementId ? { focusElementId } : {}),
+      });
     },
     [activeId],
   );
@@ -340,15 +373,17 @@ export function Workspace() {
   const handleJobSettled = useCallback(
     (job: BackgroundJob) => {
       if (job.status === "succeeded") {
-        void canvasRef.current?.syncFromServer();
-        toast("success", "生成完成，已放到画布");
+        const artifact = job.result?.artifact as { elementId?: string } | undefined;
+        void refreshCanvasFromServer(artifact?.elementId)
+          .then(() => toast("success", "生成完成，已放到画布"))
+          .catch(() => toast("error", "生成完成，但画布同步失败，请刷新重试"));
       } else if (job.status === "failed") {
         toast("error", job.errorMessage ?? "生成失败，请重试");
       } else if (job.status === "canceled") {
         toast("info", "生成已取消");
       }
     },
-    [toast],
+    [refreshCanvasFromServer, toast],
   );
   const { watchJob } = useJobFallbackPolling(activeId, handleJobSettled);
 
@@ -357,8 +392,10 @@ export function Workspace() {
     if (event.type === "artifact.ready" && event.artifact.type === "image") {
       const block: ImageBlock = event.artifact;
       if (block.elementId) {
-        // 服务端作业已经写进画布，前端只拉取，避免重复插一张
-        void canvasRef.current?.syncFromServer();
+        // 服务端作业已经写进画布，前端只拉取并聚焦，避免重复插一张
+        void refreshCanvasFromServer(block.elementId)
+          .then(() => toast("success", "图片已放到画布"))
+          .catch(() => toast("error", "图片已生成，但画布同步失败，请刷新重试"));
       } else {
         void canvasRef.current?.insertImage({
           url: block.url,
@@ -385,7 +422,7 @@ export function Workspace() {
     if (event.type === "tool.failed" && event.error.jobId) {
       watchJob(event.error.jobId);
     }
-  }, [toast, watchJob]);
+  }, [refreshCanvasFromServer, toast, watchJob]);
 
   const runStream = useCallback(
     async (
@@ -445,7 +482,7 @@ export function Workspace() {
     const id = `${DRAFT_PREFIX}${crypto.randomUUID()}`;
     setDraftId(id);
     setActiveId(id);
-    setData({ projectId: id, elements: [], files: {}, messages: [] });
+    setData({ projectId: id, elements: [], files: {}, messages: [], canvasRevision: 0 });
     setLoadingProject(false);
     setLoadingError(null);
   };
@@ -476,16 +513,39 @@ export function Workspace() {
       if (!activeId) return;
       // 草稿上什么都没画，就不必为一个空画布建项目
       if (activeId.startsWith(DRAFT_PREFIX) && elements.length === 0) return;
+      let savedProjectId: string | undefined;
       try {
-        const projectId = await ensureProject();
-        await saveCanvas(projectId, elements, files);
+        savedProjectId = await ensureProject();
+        const result = await saveCanvas(
+          savedProjectId,
+          elements,
+          files,
+          canvasRevisionRef.current,
+        );
+        canvasRevisionRef.current = result.revision;
+        setData((prev) =>
+          prev && prev.projectId === savedProjectId
+            ? { ...prev, canvasRevision: result.revision }
+            : prev,
+        );
       } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          toast("info", "画布有新内容，正在同步");
+          try {
+            if (savedProjectId) {
+              await refreshCanvasFromServer(undefined, savedProjectId);
+            }
+          } catch {
+            toast("error", "画布同步失败，请刷新页面");
+          }
+          throw err;
+        }
         console.error("[workspace] save failed", err);
         toast("error", "画布保存失败");
         throw err;
       }
     },
-    [activeId, ensureProject, toast],
+    [activeId, ensureProject, refreshCanvasFromServer, toast],
   );
 
   const handleSend = async (

@@ -6,7 +6,7 @@ import type {
   MessagePart,
   ToolBlock,
 } from "@my-lovart/shared";
-import { ArrowDown, Copy, Frame, Menu, RotateCcw } from "lucide-react";
+import { ArrowDown, Copy, Frame, Loader2, Menu, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -170,6 +170,11 @@ export function ChatPanel({
   }, []);
 
   const lastMessage = messages[messages.length - 1];
+  const hasLiveAssistant = messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "queued" || message.status === "streaming"),
+  );
   const lastContentLength = lastMessage?.content.length ?? 0;
   const lastBlockCount = lastMessage?.blocks?.length ?? 0;
   const lastUpdatedAt = lastMessage?.updatedAt ?? "";
@@ -477,6 +482,13 @@ export function ChatPanel({
                     </div>
                   </div>
                 ),
+              )}
+
+              {sending && !hasLiveAssistant && (
+                <div className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
+                  <Loader2 className="size-3 animate-spin text-muted" strokeWidth={2} />
+                  <span className="thinking-shimmer">思考中…</span>
+                </div>
               )}
             </div>
           )}

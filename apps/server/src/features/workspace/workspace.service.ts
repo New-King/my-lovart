@@ -31,6 +31,7 @@ import {
   getWorkspace,
   hydrateWorkspace,
   markRunning,
+  replaceCanvas,
   saveElements,
   setMessageOptions,
   setMessageQuestions,
@@ -93,6 +94,44 @@ async function loadCheckpointer(): Promise<AgentCheckpointer | null> {
       console.warn("[checkpointer] 未启用（初始化失败）：", message);
     }
     return null;
+  }
+}
+
+/**
+ * checkpoint 不可用后不要继续用同一条 thread：
+ * 换 thread_id，下一轮 getTuple 为空，runtime 会用已落库的消息历史重建。
+ */
+async function rotateThread(
+  projectId: string,
+  repo: WorkspaceRepository | null,
+  oldThreadId: string,
+): Promise<void> {
+  fallbackThreads.delete(projectId);
+  if (repo) {
+    try {
+      await repo.resetThreadId(projectId);
+    } catch (err) {
+      console.warn(
+        "[checkpointer] 轮换 thread_id 失败：",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  try {
+    const { deleteThreadCheckpoints } = await import(
+      "../agent/persistence/checkpointer.js"
+    );
+    void deleteThreadCheckpoints(oldThreadId).catch((err) => {
+      console.warn(
+        "[checkpointer] 清理旧 thread 失败：",
+        err instanceof Error ? err.message : err,
+      );
+    });
+  } catch (err) {
+    console.warn(
+      "[checkpointer] 清理旧 thread 失败：",
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 
@@ -159,6 +198,26 @@ export function createWorkspaceService(
     return repo;
   }
 
+  /**
+   * 画布可能被另一个进程（worker / 旧 dev server）写过。
+   * 读画布前从 DB 刷新一次，不能只信进程内缓存。
+   */
+  async function refreshCanvas(
+    projectId: string,
+    repo: WorkspaceRepository | null,
+  ): Promise<void> {
+    if (!repo) return;
+    try {
+      const snapshot = await repo.loadCanvas(projectId);
+      replaceCanvas(projectId, snapshot.elements, snapshot.files, snapshot.canvasRevision);
+    } catch (err) {
+      console.warn(
+        "[workspace] 画布刷新失败，使用进程内缓存：",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   async function persistMessage(
     repo: WorkspaceRepository | null,
     projectId: string,
@@ -176,11 +235,17 @@ export function createWorkspaceService(
 
   return {
     async get(projectId: string): Promise<Workspace> {
-      await ensureLoaded(projectId);
+      const repo = await ensureLoaded(projectId);
+      await refreshCanvas(projectId, repo);
       return getWorkspace(projectId);
     },
 
-    async saveCanvas(projectId: string, elements: unknown, files?: unknown): Promise<Workspace> {
+    async saveCanvas(
+      projectId: string,
+      elements: unknown,
+      files?: unknown,
+      expectedRevision = 0,
+    ): Promise<Workspace> {
       if (!Array.isArray(elements)) throw new WorkspaceInputError("elements 必须是数组");
       if (
         files !== undefined &&
@@ -189,21 +254,30 @@ export function createWorkspaceService(
         throw new WorkspaceInputError("files 必须是对象");
       }
       await ensureLoaded(projectId);
-      const workspace = saveElements(
-        projectId,
-        elements,
-        files as Record<string, unknown> | undefined,
-      );
       const repo = await repositoryReady;
+      const workspace = ensureWorkspace(projectId);
+      let revision = workspace.canvasRevision;
       if (repo) {
         try {
-          await repo.saveCanvas(projectId, workspace.elements, workspace.files);
+          revision = await repo.saveCanvas(
+            projectId,
+            elements,
+            (files as Record<string, unknown> | undefined) ?? workspace.files,
+            expectedRevision,
+          );
         } catch (err) {
           console.error("[workspace] 画布写库失败：", err);
           throw err;
         }
+      } else {
+        revision += 1;
       }
-      return workspace;
+      return saveElements(
+        projectId,
+        elements,
+        (files as Record<string, unknown> | undefined) ?? workspace.files,
+        revision,
+      );
     },
 
     /** 用户消息先落库，再开始运行；失败也不会丢这句话。 */
@@ -231,6 +305,7 @@ export function createWorkspaceService(
       signal: AbortSignal,
     ): AsyncGenerator<RunEvent> {
       const repo = await ensureLoaded(projectId);
+      await refreshCanvas(projectId, repo);
       const runId = randomUUID();
       const messageId = randomUUID();
       startAssistantMessage(projectId, messageId);
@@ -380,7 +455,13 @@ export function createWorkspaceService(
             signal,
             trace,
             ...(checkpointer ? { checkpointer } : {}),
-            ...(threadId ? { threadId } : {}),
+            ...(threadId
+              ? {
+                  threadId,
+                  onCheckpointUnavailable: (brokenThreadId: string) =>
+                    rotateThread(projectId, repo, brokenThreadId),
+                }
+              : {}),
           })) {
             if (
               event.type === "artifact.ready" &&

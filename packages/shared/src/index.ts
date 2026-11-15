@@ -28,6 +28,12 @@ export type ToolBlock = {
   status: ToolStatus;
   title: string;
   detail?: string;
+  /** 工具入参摘要；展开该步骤时显示 */
+  inputSummary?: string;
+  /** 工具输出摘要；展开该步骤时显示 */
+  outputSummary?: string;
+  /** 失败原因；展开该步骤时显示 */
+  error?: string;
   /** 关联到哪一步；界面用它把工具挂在对应步骤下 */
   stepId?: string;
   startedAt?: string;
