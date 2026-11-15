@@ -38,7 +38,7 @@ function ThumbButton({
         aria-expanded={expanded}
         onClick={onClick}
         className={`peer grid size-7 place-items-center rounded-md transition-colors ${
-          active ? "text-ink" : "text-faint hover:bg-ink/5 hover:text-ink"
+          active ? "text-ink" : "text-faint hover:text-ink"
         }`}
       >
         {children}
@@ -54,7 +54,14 @@ function ThumbButton({
  * 回答下方的评价条：假数据版本，只维护本地状态。
  * 点踩展开反馈表单，提交只弹 toast，不请求后端。
  */
-export function MessageFeedback({ messageId }: { messageId: string }) {
+export function MessageFeedback({
+  messageId,
+  onExpand,
+}: {
+  messageId: string;
+  /** 展开反馈表单后通知外层滚到底，别让表单被挡在可视区下面 */
+  onExpand?: () => void;
+}) {
   const toast = useToast();
   const [vote, setVote] = useState<Vote>(null);
   const [open, setOpen] = useState(false);
@@ -87,6 +94,7 @@ export function MessageFeedback({ messageId }: { messageId: string }) {
     setSubmitted(false);
     setVote("down");
     setOpen(true);
+    onExpand?.();
   };
 
   const toggleType = (type: string) => {

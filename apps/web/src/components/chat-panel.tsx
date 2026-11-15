@@ -485,7 +485,13 @@ export function ChatPanel({
                     )}
 
                     {message.status !== "streaming" && message.status !== "queued" && (
-                      <MessageFeedback messageId={message.id} />
+                      <MessageFeedback
+                        messageId={message.id}
+                        onExpand={() => {
+                          // 表单挂载后再滚，否则量到的 scrollHeight 还是旧值
+                          window.requestAnimationFrame(() => scrollToBottom(true));
+                        }}
+                      />
                     )}
                   </div>
                 ),
