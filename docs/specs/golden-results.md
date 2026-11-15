@@ -26,6 +26,8 @@
 | G25 checkpoint 写失败 | 代码通过，未故障注入 | 重试 + 降级完成 + thread 轮换已实现（`docs/notes/M19.md`）；真实正常轮验证 checkpointer 可用，超时路径待注入测试 |
 | G26 服务端插画布可见 | 通过（Phase 2a/2b） | 多进程 worker 抢作业后：DB revision 1/1 元素，修复前 HTTP 返回 0/0，修复后返回 1/1；下一轮模型能答出画布上的图；旧 revision 保存返回 409 |
 | G27 accepted 前反馈 | 代码通过，未浏览器点测 | 本地 shimmer 行 + streaming 零记录也渲染 + 全工具行已实现；布局/动效需用户页面确认 |
+| G28 视频落画布 | 通过（插入链路，未真机播放） | 临时项目 `insertVideoOnCanvas`：embeddable 元素、revision=1、isVideo/link/duration 正确；上下文识别为 1 条视频；播放器 UI 待用户验证（`docs/notes/M20.md`） |
+| G29 进度与取消 | 部分（进度通过，取消未真测） | 模拟 running job：progress/stage 回调、succeeded/100 通过；worker 取消 abort 已实现，真实视频取消按约定留给用户测 |
 
 ## 当前失败/缺口
 
@@ -35,6 +37,7 @@
 4. 视频画布元素/内联播放、worker 进度映射、真实超时/取消验证仍是 P0 缺口（Phase 2b）。
 5. G24 的卡片交互（逐题勾选、自动滚动、跳过/提交）还没有浏览器自动化；目前只有布局预览和发送格式的端到端验证。
 6. G25 的 checkpoint 写失败没有做故障注入；G27 的 shimmer/展开效果需要在真实页面点测。
+7. G28 的视频播放器与 G29 的真实取消没有做视频生成手测（按用户要求停在最终 generate_video 前）。
 
 ## 下一步
 

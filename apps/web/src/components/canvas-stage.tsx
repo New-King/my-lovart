@@ -22,6 +22,7 @@ import type {
 import type { CanvasCommand } from "@my-lovart/shared";
 import { applyCanvasCommands } from "@/lib/canvas-command-runner";
 import type { CanvasCommandResult } from "@/lib/canvas-commands";
+import { VideoCanvasElement } from "./canvas/video-canvas-element";
 import {
   arrangeCanvasImages,
   insertImageFileIntoCanvas,
@@ -76,6 +77,17 @@ export type CanvasStageHandle = {
     workspace?: WorkspaceData;
     focusElementId?: string;
   }) => Promise<void>;
+  /** 服务端没落画布时的兜底：客户端插入 embeddable 视频 */
+  insertVideo: (input: {
+    url: string;
+    title?: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    assetId?: string;
+    batchId?: string;
+  }) => Promise<void>;
   /** 执行 Agent 下发的画布动作（移动 / 对齐 / 删除…） */
   applyCommands: (commands: CanvasCommand[]) => CanvasCommandResult;
 };
@@ -83,6 +95,38 @@ export type CanvasStageHandle = {
 function waitAtLeast(start: number, ms: number) {
   const remaining = ms - (Date.now() - start);
   return remaining > 0 ? new Promise((resolve) => setTimeout(resolve, remaining)) : Promise.resolve();
+}
+
+type VideoEmbeddedInfo = {
+  src: string;
+  width: number;
+  height: number;
+  durationSeconds?: number;
+  title?: string;
+};
+
+/** embeddable 元素：服务端写 customData.isVideo，旧元素用扩展名兜底 */
+function videoEmbeddedInfo(element: unknown): VideoEmbeddedInfo | null {
+  if (!element || typeof element !== "object") return null;
+  const record = element as Record<string, unknown>;
+  const link = typeof record.link === "string" ? record.link : "";
+  if (!link) return null;
+  const custom =
+    record.customData && typeof record.customData === "object"
+      ? (record.customData as Record<string, unknown>)
+      : {};
+  const looksLikeVideo =
+    custom.isVideo === true || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(link);
+  if (!looksLikeVideo) return null;
+  return {
+    src: link,
+    width: typeof record.width === "number" ? record.width : 560,
+    height: typeof record.height === "number" ? record.height : 315,
+    ...(typeof custom.durationSeconds === "number"
+      ? { durationSeconds: custom.durationSeconds }
+      : {}),
+    ...(typeof custom.title === "string" ? { title: custom.title } : {}),
+  };
 }
 
 function hasFileDrag(dataTransfer: DataTransfer) {
@@ -360,6 +404,96 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           null,
           input.silent ?? false,
         ),
+      async insertVideo(input) {
+        const api = apiRef.current;
+        if (!api || !hydrated.current) {
+          showToast("error", "画布还在加载，视频先留在对话里");
+          return;
+        }
+        const rawWidth = input.width && input.width > 0 ? input.width : 560;
+        const rawHeight = input.height && input.height > 0 ? input.height : 315;
+        const scale = Math.min(1, 560 / rawWidth, 420 / rawHeight);
+        const width = Math.round(rawWidth * scale);
+        const height = Math.round(rawHeight * scale);
+        const appState = api.getAppState();
+        const elements = api.getSceneElements().filter((element) => !element.isDeleted);
+        let x: number;
+        let y: number;
+        if (elements.length === 0) {
+          const center = viewportCoordsToSceneCoords(
+            {
+              clientX: (appState.offsetLeft ?? 0) + appState.width / 2,
+              clientY: (appState.offsetTop ?? 0) + appState.height / 2,
+            },
+            appState,
+          );
+          x = Math.round(center.x - width / 2);
+          y = Math.round(center.y - height / 2);
+        } else {
+          let maxRight = -Infinity;
+          let centerY = 0;
+          for (const element of elements) {
+            const right = element.x + element.width;
+            if (right > maxRight) {
+              maxRight = right;
+              centerY = element.y + element.height / 2;
+            }
+          }
+          x = Math.round(maxRight + 24);
+          y = Math.round(centerY - height / 2);
+        }
+
+        const now = Date.now();
+        const element = {
+          type: "embeddable",
+          id: `el-${crypto.randomUUID()}`,
+          x,
+          y,
+          width,
+          height,
+          angle: 0,
+          strokeColor: "transparent",
+          backgroundColor: "transparent",
+          fillStyle: "solid",
+          strokeWidth: 1,
+          strokeStyle: "solid",
+          roughness: 0,
+          opacity: 100,
+          groupIds: [],
+          roundness: null,
+          boundElements: null,
+          frameId: null,
+          index: null,
+          seed: Math.floor(Math.random() * 2_000_000_000),
+          version: 1,
+          versionNonce: Math.floor(Math.random() * 2_000_000_000),
+          isDeleted: false,
+          updated: now,
+          link: input.url,
+          locked: false,
+          status: "saved",
+          scale: [1, 1],
+          crop: null,
+          customData: {
+            isVideo: true,
+            name: input.title ?? "生成视频",
+            ...(input.title ? { title: input.title } : {}),
+            ...(input.assetId ? { assetId: input.assetId } : {}),
+            ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+            ...(input.durationSeconds !== undefined
+              ? { durationSeconds: input.durationSeconds }
+              : {}),
+            ...(input.batchId ? { batchId: input.batchId } : {}),
+            source: "generated",
+          },
+        };
+        api.updateScene({
+          elements: [...elements, element] as never[],
+          captureUpdate: "IMMEDIATELY",
+        });
+        api.scrollToContent(element as never, { fitToContent: true, animate: true });
+        updateVisibility(api);
+      },
       applyCommands(commands) {
         const api = apiRef.current;
         if (!api || !hydrated.current) {
@@ -691,6 +825,15 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             theme="light"
             langCode="zh-CN"
             initialData={{ elements: [] }}
+            validateEmbeddable={(link) =>
+              typeof link === "string" &&
+              (link.includes("/files/") ||
+                /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(link))
+            }
+            renderEmbeddable={(element) => {
+              const info = videoEmbeddedInfo(element);
+              return info ? <VideoCanvasElement {...info} /> : null;
+            }}
             excalidrawAPI={handleApi}
             onChange={(next, appState, nextFiles) => {
               if (!alive.current || !hydrated.current) return;

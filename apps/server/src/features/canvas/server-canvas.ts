@@ -127,6 +127,116 @@ function buildImageElement(
  * 作业完成后由服务端直接把图片插进画布：用户关掉页面也能拿到结果。
  * 和前端自动插入互斥——工具结果会带 elementId，前端只刷新不重复插。
  */
+export type InsertVideoInput = {
+  projectId: string;
+  assetId: string;
+  title: string;
+  prompt: string;
+  url: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  durationSeconds?: number;
+  batchId?: string;
+};
+
+const MAX_VIDEO_WIDTH = 560;
+const MAX_VIDEO_HEIGHT = 420;
+
+function fitVideo(width: number, height: number) {
+  if (width <= 0 || height <= 0) return { width: 560, height: 315 };
+  const scale = Math.min(1, MAX_VIDEO_WIDTH / width, MAX_VIDEO_HEIGHT / height);
+  return { width: Math.round(width * scale), height: Math.round(height * scale) };
+}
+
+function buildVideoElement(
+  placement: InsertImageResult["placement"],
+  input: InsertVideoInput,
+): CanvasElement {
+  const now = Date.now();
+  return {
+    type: "embeddable",
+    id: `el-${randomUUID()}`,
+    x: placement.x,
+    y: placement.y,
+    width: placement.width,
+    height: placement.height,
+    angle: 0,
+    strokeColor: "transparent",
+    backgroundColor: "transparent",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roughness: 0,
+    opacity: 100,
+    groupIds: [],
+    roundness: null,
+    boundElements: null,
+    frameId: null,
+    index: null,
+    seed: Math.floor(Math.random() * 2_000_000_000),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 2_000_000_000),
+    isDeleted: false,
+    updated: now,
+    link: input.url,
+    locked: false,
+    status: "saved",
+    scale: [1, 1],
+    crop: null,
+    customData: {
+      isVideo: true,
+      name: input.title,
+      title: input.title,
+      assetId: input.assetId,
+      prompt: input.prompt.slice(0, 500),
+      mimeType: input.mimeType,
+      ...(input.durationSeconds !== undefined
+        ? { durationSeconds: input.durationSeconds }
+        : {}),
+      ...(input.batchId ? { batchId: input.batchId } : {}),
+      source: "generated",
+    },
+  };
+}
+
+/**
+ * 视频落画布：用 Excalidraw embeddable + 前端 renderEmbeddable 内联播放。
+ * 不写 canvas files，视频始终走 /files/:id。
+ */
+export async function insertVideoOnCanvas(
+  input: InsertVideoInput,
+): Promise<InsertImageResult | null> {
+  return withCanvasLock(input.projectId, async () => {
+    const repo = await getWorkspaceRepository();
+    if (!repo) return null;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = await repo.loadCanvas(input.projectId);
+      const elements = [...snapshot.elements] as CanvasElement[];
+      const size = fitVideo(input.width, input.height);
+      const placement = calculatePlacement(elements, size.width, size.height);
+      const element = buildVideoElement(placement, input);
+      elements.push(element);
+      try {
+        const revision = await repo.saveCanvas(
+          input.projectId,
+          elements,
+          snapshot.files,
+          snapshot.canvasRevision,
+        );
+        replaceCanvas(input.projectId, elements, snapshot.files, revision);
+        return { elementId: String(element.id), placement };
+      } catch (err) {
+        if (!(err instanceof CanvasConflictError) || attempt > 0) throw err;
+        console.warn("[canvas] 画布刚被前端更新，重新计算视频位置后再插入");
+      }
+    }
+
+    throw new CanvasConflictError();
+  });
+}
+
 export async function insertImageOnCanvas(
   input: InsertImageInput,
 ): Promise<InsertImageResult | null> {

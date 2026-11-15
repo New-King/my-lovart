@@ -35,7 +35,7 @@
 - [x] 持久化线程与画布/文件
 - [x] 产物账本（标题/prompt/模型/血缘/版本）
 - [ ] 分镜与镜头状态
-- [x] 生成作业队列（图片/视频；视频画布播放待做）
+- [x] 生成作业队列（图片/视频；视频画布 embeddable 与内联播放已做，真机待验）
 - [x] 生成过程单行动态状态（流光 + 秒数），默认折叠；所有工具步骤可展开输入/输出
 - [x] 画布 revision 乐观锁 + 跨进程刷新；生成图落画布后前端聚焦并提示
 - [ ] 画布工具深度（add_text/add_shape/add_line/update_text/update_style）
@@ -107,11 +107,11 @@
 
 验收：真实 Seedream 作业 29.4s 成功，资产/画布/artifact 一致；记录 `docs/notes/M17.md`。
 
-### 2b · 待做
+### 2b · 进行中
 
-- [ ] 视频画布元素与内联播放
-- [ ] 工具卡片持续进度（worker → job 进度）
-- [ ] 生成中取消真实手测
+- [x] 视频画布元素与内联播放（embeddable + renderEmbeddable；真机播放待用户验证）
+- [x] 工具卡片持续进度（worker → job 进度 → tool.progress）
+- [ ] 生成中取消真实手测（代码已完成：worker 监听 canceled 并 abort provider）
 - [ ] 非重试错误分类、限流与多实例公平性
 
 ## Phase 2.5 · 分镜与镜头

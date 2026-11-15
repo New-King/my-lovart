@@ -79,6 +79,9 @@ export type VideoBlock = {
   prompt?: string;
   model?: string;
   sourceAssetIds?: string[];
+  /** 服务端已落画布时的 embeddable 元素 id */
+  elementId?: string;
+  placement?: { x: number; y: number; width: number; height: number };
   batchId?: string;
 };
 

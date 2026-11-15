@@ -94,7 +94,12 @@ function ToolRow({ tool, now }: { tool: ToolBlock; now: number }) {
           strokeWidth={1.75}
         />
         <span className="shrink-0">{tool.title}</span>
-        <span className="min-w-0 flex-1 truncate text-faint">· {tool.detail}</span>
+        <span className="min-w-0 flex-1 truncate text-faint">
+          ·{" "}
+          {live && tool.stage
+            ? `${tool.stage}${typeof tool.progress === "number" && tool.progress > 0 ? ` · ${tool.progress}%` : ""}`
+            : tool.detail}
+        </span>
         {live && (
           <Loader2 className="size-3 shrink-0 animate-spin text-faint" strokeWidth={2} />
         )}

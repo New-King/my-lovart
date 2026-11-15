@@ -389,26 +389,47 @@ export function Workspace() {
 
   const handleEvent = useCallback((event: RunEvent) => {
     setData((prev) => applyRunEvent(prev, event));
-    if (event.type === "artifact.ready" && event.artifact.type === "image") {
-      const block: ImageBlock = event.artifact;
-      if (block.elementId) {
-        // 服务端作业已经写进画布，前端只拉取并聚焦，避免重复插一张
-        void refreshCanvasFromServer(block.elementId)
-          .then(() => toast("success", "图片已放到画布"))
-          .catch(() => toast("error", "图片已生成，但画布同步失败，请刷新重试"));
-      } else {
-        void canvasRef.current?.insertImage({
-          url: block.url,
-          name: block.title || block.prompt || "生成图像",
-          mimeType: block.mimeType,
-          width: block.width,
-          height: block.height,
-          assetId: block.id,
-          ...(block.title ? { title: block.title } : {}),
-          ...(block.prompt ? { prompt: block.prompt } : {}),
-          ...(block.batchId ? { batchId: block.batchId } : {}),
-          silent: true,
-        });
+    if (event.type === "artifact.ready") {
+      const block = event.artifact;
+      if (block.type === "image") {
+        if (block.elementId) {
+          // 服务端作业已经写进画布，前端只拉取并聚焦，避免重复插一张
+          void refreshCanvasFromServer(block.elementId)
+            .then(() => toast("success", "图片已放到画布"))
+            .catch(() => toast("error", "图片已生成，但画布同步失败，请刷新重试"));
+        } else {
+          void canvasRef.current?.insertImage({
+            url: block.url,
+            name: block.title || block.prompt || "生成图像",
+            mimeType: block.mimeType,
+            width: block.width,
+            height: block.height,
+            assetId: block.id,
+            ...(block.title ? { title: block.title } : {}),
+            ...(block.prompt ? { prompt: block.prompt } : {}),
+            ...(block.batchId ? { batchId: block.batchId } : {}),
+            silent: true,
+          });
+        }
+      } else if (block.type === "video") {
+        if (block.elementId) {
+          void refreshCanvasFromServer(block.elementId)
+            .then(() => toast("success", "视频已放到画布"))
+            .catch(() => toast("error", "视频已生成，但画布同步失败，请刷新重试"));
+        } else {
+          void canvasRef.current?.insertVideo({
+            url: block.url,
+            ...(block.title ? { title: block.title } : {}),
+            mimeType: block.mimeType,
+            width: block.width,
+            height: block.height,
+            ...(block.durationSeconds !== undefined
+              ? { durationSeconds: block.durationSeconds }
+              : {}),
+            assetId: block.id,
+            ...(block.batchId ? { batchId: block.batchId } : {}),
+          });
+        }
       }
     }
     if (event.type === "canvas.command") {

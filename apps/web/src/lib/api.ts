@@ -56,6 +56,8 @@ export type BackgroundJob = {
   result?: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  progress?: number;
+  stage?: string;
   attemptCount: number;
   maxAttempts: number;
   createdAt: string;

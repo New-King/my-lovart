@@ -165,6 +165,13 @@ export function createAgentTools(context: ToolContext) {
             const finished = await waitForJob(context.projectId, job.id, {
               timeoutMs: 120_000,
               signal: context.signal,
+              onProgress: (progressJob) => {
+                context.bus.push({
+                  type: "progress",
+                  progress: progressJob.progress,
+                  stage: progressJob.stage ?? "生成中",
+                });
+              },
             });
             if (context.signal.aborted) {
               await cancelJob(context.projectId, job.id).catch(() => undefined);
@@ -285,6 +292,13 @@ export function createAgentTools(context: ToolContext) {
             const finished = await waitForJob(context.projectId, job.id, {
               timeoutMs: 600_000,
               signal: context.signal,
+              onProgress: (progressJob) => {
+                context.bus.push({
+                  type: "progress",
+                  progress: progressJob.progress,
+                  stage: progressJob.stage ?? "渲染中",
+                });
+              },
             });
             if (context.signal.aborted) {
               await cancelJob(context.projectId, job.id).catch(() => undefined);

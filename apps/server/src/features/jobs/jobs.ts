@@ -15,6 +15,8 @@ export type BackgroundJob = {
   result?: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  progress: number;
+  stage?: string;
   attemptCount: number;
   maxAttempts: number;
   createdAt: string;
@@ -35,6 +37,8 @@ type JobRow = {
   result: unknown;
   error_code: string | null;
   error_message: string | null;
+  progress: number | null;
+  stage: string | null;
   attempt_count: number;
   max_attempts: number;
   created_at: string;
@@ -45,7 +49,7 @@ type JobRow = {
 };
 
 const COLUMNS =
-  "id, project_id, session_id, thread_id, job_type, status, payload, result, error_code, error_message, attempt_count, max_attempts, created_at, started_at, completed_at, failed_at, canceled_at";
+  "id, project_id, session_id, thread_id, job_type, status, payload, result, error_code, error_message, progress, stage, attempt_count, max_attempts, created_at, started_at, completed_at, failed_at, canceled_at";
 
 function toJob(row: JobRow): BackgroundJob {
   const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -61,6 +65,8 @@ function toJob(row: JobRow): BackgroundJob {
     ...(row.result ? { result: record(row.result) } : {}),
     ...(row.error_code ? { errorCode: row.error_code } : {}),
     ...(row.error_message ? { errorMessage: row.error_message } : {}),
+    progress: Math.min(100, Math.max(0, Number(row.progress ?? 0))),
+    ...(row.stage ? { stage: row.stage } : {}),
     attemptCount: row.attempt_count,
     maxAttempts: row.max_attempts,
     createdAt: row.created_at,
@@ -129,6 +135,22 @@ export async function cancelJob(projectId: string, jobId: string): Promise<boole
   return Boolean(data);
 }
 
+export async function updateJobProgress(
+  projectId: string,
+  jobId: string,
+  progress: number,
+  stage?: string,
+): Promise<void> {
+  const value = Math.min(100, Math.max(0, Math.round(progress)));
+  const { error } = await getDb()
+    .from("background_jobs")
+    .update({ progress: value, ...(stage ? { stage: stage.slice(0, 60) } : {}) })
+    .eq("project_id", projectId)
+    .eq("id", jobId)
+    .eq("status", "running");
+  if (error) throw error;
+}
+
 export async function claimNextJob(): Promise<BackgroundJob | null> {
   const { data, error } = await getDb().rpc("claim_background_job");
   if (error) throw error;
@@ -145,6 +167,8 @@ export async function markJobSucceeded(
     .update({
       status: "succeeded",
       result,
+      progress: 100,
+      stage: "完成",
       completed_at: new Date().toISOString(),
     })
     .eq("id", jobId)
@@ -166,6 +190,8 @@ export async function markJobFailed(
         status: "queued",
         error_code: code,
         error_message: message.slice(0, 1000),
+        progress: 0,
+        stage: null,
         started_at: null,
       })
       .eq("id", job.id);
@@ -188,13 +214,24 @@ export async function markJobFailed(
 export async function waitForJob(
   projectId: string,
   jobId: string,
-  options: { timeoutMs: number; signal: AbortSignal },
+  options: {
+    timeoutMs: number;
+    signal: AbortSignal;
+    onProgress?: (job: BackgroundJob) => void;
+  },
 ): Promise<BackgroundJob | null> {
   const deadline = Date.now() + options.timeoutMs;
+  let lastProgress = -1;
+  let lastStage: string | undefined;
   while (Date.now() < deadline) {
     if (options.signal.aborted) return null;
     const job = await getJob(projectId, jobId);
     if (!job) return null;
+    if (job.progress !== lastProgress || job.stage !== lastStage) {
+      lastProgress = job.progress;
+      lastStage = job.stage;
+      options.onProgress?.(job);
+    }
     if (job.status === "succeeded" || job.status === "failed" || job.status === "canceled") {
       return job;
     }

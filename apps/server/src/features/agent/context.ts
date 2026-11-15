@@ -53,6 +53,7 @@ const TYPE_LABELS: Record<string, string> = {
   arrow: "箭头",
   line: "线条",
   frame: "画框",
+  embeddable: "嵌入内容",
 };
 
 export async function buildAttachmentContext(
@@ -185,9 +186,17 @@ export function buildCanvasContext(
     const width = Math.max(1, Math.round(Number(element.width) || 0));
     const height = Math.max(1, Math.round(Number(element.height) || 0));
     const alias = `canvas-${briefs.length + 1}`;
-    const custom = element.customData as { name?: unknown; title?: unknown; assetId?: unknown } | undefined;
+    const custom = element.customData as {
+      name?: unknown;
+      title?: unknown;
+      assetId?: unknown;
+      isVideo?: unknown;
+    } | undefined;
 
     let name = TYPE_LABELS[element.type] ?? element.type;
+    if (element.type === "embeddable" && custom?.isVideo === true) {
+      name = "视频";
+    }
     if (typeof custom?.title === "string" && custom.title.trim()) {
       name = custom.title.trim().slice(0, 40);
     } else if (typeof custom?.name === "string" && custom.name.trim()) {
@@ -221,6 +230,7 @@ export function buildCanvasContext(
   const lines: string[] = [];
   const xmlLines: string[] = [];
   let imageCount = 0;
+  let videoCount = 0;
 
   for (const brief of briefs) {
     const raw = elements.find(
@@ -232,6 +242,9 @@ export function buildCanvasContext(
     lines.push(
       `- [${brief.alias}] ${brief.type} id=${brief.id}${brief.assetId ? ` asset=${brief.assetId}` : ""} 「${brief.name}」 @ (${brief.x}, ${brief.y}) ${brief.width}×${brief.height}`,
     );
+
+    const rawCustom = raw.customData as { isVideo?: unknown } | undefined;
+    if (rawCustom?.isVideo === true) videoCount += 1;
 
     if (brief.type !== "image") continue;
     imageCount += 1;
@@ -248,10 +261,13 @@ export function buildCanvasContext(
     );
   }
 
-  const heading =
-    imageCount > 0
-      ? `画布上有 ${briefs.length} 个元素（其中 ${imageCount} 张图片）：`
-      : `画布上有 ${briefs.length} 个元素（没有图片）：`;
+  const media = [
+    imageCount > 0 ? `${imageCount} 张图片` : "",
+    videoCount > 0 ? `${videoCount} 条视频` : "",
+  ].filter(Boolean);
+  const heading = `画布上有 ${briefs.length} 个元素${
+    media.length > 0 ? `（${media.join("，")}）` : "（没有图片或视频）"
+  }：`;
 
   return {
     summary: `${heading}\n${lines.join("\n")}`,

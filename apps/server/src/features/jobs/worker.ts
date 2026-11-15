@@ -4,7 +4,7 @@ import { getDb } from "../../db/supabase.js";
 import { env } from "../../lib/env.js";
 import { getAssetsRepository } from "../assets/assets.repository.js";
 import type { ProjectAsset } from "../assets/assets.js";
-import { insertImageOnCanvas } from "../canvas/server-canvas.js";
+import { insertImageOnCanvas, insertVideoOnCanvas } from "../canvas/server-canvas.js";
 import { importRemoteFile } from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
 import { GenerationError } from "../generation/types.js";
@@ -15,6 +15,7 @@ import {
   jobsEnabled,
   markJobFailed,
   markJobSucceeded,
+  updateJobProgress,
   type BackgroundJob,
 } from "./jobs.js";
 
@@ -28,6 +29,59 @@ class JobCanceledError extends Error {
 let started = false;
 let active = 0;
 const MAX_CONCURRENT = 2;
+
+async function reportProgress(
+  job: BackgroundJob,
+  progress: number,
+  stage: string,
+): Promise<void> {
+  await updateJobProgress(job.projectId, job.id, progress, stage).catch((err) => {
+    console.warn(
+      "[worker] 进度写库失败：",
+      err instanceof Error ? err.message : err,
+    );
+  });
+}
+
+/**
+ * 作业有自己的超时和取消：
+ * - 用户在页面上取消 → jobs.status=canceled，这里 abort provider
+ * - 超时 → 抛 TimeoutError，交给 execute 标记 job_timeout
+ */
+async function runJobGeneration<T>(
+  job: BackgroundJob,
+  timeoutMs: number,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = AbortSignal.any([timeout, controller.signal]);
+  let stopped = false;
+
+  const timer = setInterval(() => {
+    void getJob(job.projectId, job.id)
+      .then((current) => {
+        if (!stopped && current?.status === "canceled") {
+          stopped = true;
+          controller.abort();
+        }
+      })
+      .catch(() => undefined);
+  }, 2_000);
+
+  try {
+    return await run(signal);
+  } catch (err) {
+    if (controller.signal.aborted) throw new JobCanceledError();
+    if (timeout.aborted) {
+      throw Object.assign(new Error("生成超时"), { name: "TimeoutError" });
+    }
+    throw err;
+  } finally {
+    stopped = true;
+    clearInterval(timer);
+  }
+}
 
 function assetFromArtifact(
   projectId: string,
@@ -81,16 +135,20 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     ? payload.sourceAssetIds.filter((item): item is string => typeof item === "string")
     : [];
 
-  const result = await generateImageWithVolces({
-    prompt,
-    aspectRatio: (asString(payload.aspectRatio) || "3:4") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
-    referenceImages: inputImages,
-    signal: AbortSignal.timeout(5 * 60_000),
-  });
+  await reportProgress(job, 12, "提交 Seedream");
+  const result = await runJobGeneration(job, 5 * 60_000, (signal) =>
+    generateImageWithVolces({
+      prompt,
+      aspectRatio: (asString(payload.aspectRatio) || "3:4") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
+      referenceImages: inputImages,
+      signal,
+    }),
+  );
   if ((await getJob(job.projectId, job.id))?.status === "canceled") {
     throw new JobCanceledError();
   }
 
+  await reportProgress(job, 82, "下载结果");
   const stored = await importRemoteFile(result.url, `http://127.0.0.1:${env.port}`, {
     name: title,
     fallbackMimeType: result.mimeType,
@@ -110,6 +168,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     sourceAssetIds,
   };
 
+  await reportProgress(job, 92, "落画布");
   const placed = await insertImageOnCanvas({
     projectId: job.projectId,
     assetId: artifact.id,
@@ -151,18 +210,24 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     ? payload.sourceAssetIds.filter((item): item is string => typeof item === "string")
     : [];
 
-  const result = await generateVideoWithMetaso({
-    prompt,
-    aspectRatio: (asString(payload.aspectRatio) || "16:9") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
-    durationSeconds: asNumber(payload.durationSeconds) ?? 8,
-    referenceImages: inputImages,
-    signal: AbortSignal.timeout(10 * 60_000),
-    onProgress: () => undefined,
-  });
+  await reportProgress(job, 8, "提交任务");
+  const result = await runJobGeneration(job, 10 * 60_000, (signal) =>
+    generateVideoWithMetaso({
+      prompt,
+      aspectRatio: (asString(payload.aspectRatio) || "16:9") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
+      durationSeconds: asNumber(payload.durationSeconds) ?? 8,
+      referenceImages: inputImages,
+      signal,
+      onProgress: (progress, stage) => {
+        void reportProgress(job, progress, stage);
+      },
+    }),
+  );
   if ((await getJob(job.projectId, job.id))?.status === "canceled") {
     throw new JobCanceledError();
   }
 
+  await reportProgress(job, 92, "下载结果");
   const stored = await importRemoteFile(result.url, `http://127.0.0.1:${env.port}`, {
     name: title,
     fallbackMimeType: result.mimeType,
@@ -182,13 +247,41 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     sourceAssetIds,
   };
 
+  await reportProgress(job, 94, "落画布");
+  const placed = await insertVideoOnCanvas({
+    projectId: job.projectId,
+    assetId: artifact.id,
+    title,
+    prompt,
+    url: artifact.url,
+    mimeType: artifact.mimeType,
+    width: artifact.width,
+    height: artifact.height,
+    ...(artifact.durationSeconds !== undefined
+      ? { durationSeconds: artifact.durationSeconds }
+      : {}),
+    ...(typeof payload.batchId === "string" ? { batchId: payload.batchId } : {}),
+  }).catch((err) => {
+    console.warn("[worker] 视频上画布失败：", err instanceof Error ? err.message : err);
+    return null;
+  });
+
+  if (placed) {
+    artifact.elementId = placed.elementId;
+    artifact.placement = placed.placement;
+  }
+
   await getAssetsRepository()
     .then((repo) => repo.save(job.projectId, assetFromArtifact(job.projectId, artifact)))
     .catch((err) => {
       console.warn("[worker] 视频资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
-  return { artifact, jobId: job.id };
+  return {
+    artifact,
+    jobId: job.id,
+    ...(placed ? { elementId: placed.elementId, placement: placed.placement } : {}),
+  };
 }
 
 async function execute(job: BackgroundJob): Promise<void> {
@@ -206,7 +299,15 @@ async function execute(job: BackgroundJob): Promise<void> {
       console.log(`[worker] 已取消 ${job.id}`);
       return;
     }
-    if (err instanceof Error && err.name === "TimeoutError") {
+    const latest = await getJob(job.projectId, job.id).catch(() => null);
+    if (latest?.status === "canceled") {
+      console.log(`[worker] 已取消（忽略收尾错误）${job.id}`);
+      return;
+    }
+    if (
+      (err instanceof Error && err.name === "TimeoutError") ||
+      (err instanceof GenerationError && err.code === "timeout")
+    ) {
       await markJobFailed(job, "job_timeout", "生成超时，可重试");
       return;
     }
