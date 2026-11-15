@@ -21,6 +21,12 @@
 | G14 画布缩放 | 通过 | 实测只调 manipulate_canvas resize |
 | G15 纯文字任务 | 通过 | 不调用视觉工具 |
 | G16 跨轮引用已生成图片 | 部分（Phase 1c） | 资产账本与 `<project_assets>` 已通：预置资产问标题，真实模型答对；完整“画布删图后改图”还需一次真实生成手测 |
+| G17 修改第 3 个镜头 | 通过（Phase 2.5） | 真实模型：第 3 镜头机位改为俯拍，`get_storyboard` + `update_shot`；只改目标镜头。另给第 1 镜头真实生成 3:4 参考图，shot active/asset.shot_id/画布一致 |
+| G18 重置分镜 | 通过（Phase 2.5） | 第一轮说明影响并等确认；确认后清空 active、状态 draft，旧资产仍保留，revisions 增加 reset |
+| G19 版本回退 | 通过（Phase 2.5） | “用回第二版” → `get_storyboard` + `set_shot_asset`，active 切到 v2，v1 保留，不重新生成 |
+| G20 两个分镜并存 | 通过（Phase 2.5） | 项目两个分镜，问“产品开箱第 2 镜头”答对；新建分镜自动成为唯一 active |
+| G21 资产很多时的上下文预算 | 未跑 | 已有 `<project_assets>` 摘要 + `list_assets`，未构造 40 资产场景 |
+| G23 生成失败保留状态 | 未跑 | 依赖一次失败生成；设计上 worker 失败不写 active，旧版本保留 |
 | G22 无分镜无资产 | 通过（Phase 1c） | 空项目不注入 `<project_state>` / `<project_assets>`，不主动汇报空状态 |
 | G24 逐题提问卡 | 通过（后端+回答闭环，Phase 2a） | 真实模型：一句承接 + 3 题结构化问题，`messages.questions` 落库；按卡片格式回答后直接出图（Seedream 30.6s），资产与画布 `assetId` 一致。UI 未在真实浏览器点测（见 `docs/notes/M18.md`） |
 | G25 checkpoint 写失败 | 代码通过，未故障注入 | 重试 + 降级完成 + thread 轮换已实现（`docs/notes/M19.md`）；真实正常轮验证 checkpointer 可用，超时路径待注入测试 |
@@ -38,6 +44,7 @@
 5. G24 的卡片交互（逐题勾选、自动滚动、跳过/提交）还没有浏览器自动化；目前只有布局预览和发送格式的端到端验证。
 6. G25 的 checkpoint 写失败没有做故障注入；G27 的 shimmer/展开效果需要在真实页面点测。
 7. G28 的视频播放器与 G29 的真实取消没有做视频生成手测（按用户要求停在最终 generate_video 前）。
+8. G21 的 40 资产预算场景、G23 的失败生成保留状态还没构造；分镜 UI 也还没有。
 
 ## 下一步
 

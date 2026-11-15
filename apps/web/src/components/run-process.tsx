@@ -3,16 +3,25 @@
 import type { ChatMessage, Thought, ToolBlock } from "@my-lovart/shared";
 import {
   AlertCircle,
+  ArrowUpDown,
   ChevronDown,
   Clapperboard,
   FileSearch,
+  FileText,
+  History,
   ImagePlus,
+  Layers,
   Lightbulb,
+  List,
   ListChecks,
   Loader2,
   Move,
+  Pencil,
+  Plus,
+  RotateCcw,
   Search,
   ScanEye,
+  Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
@@ -27,6 +36,17 @@ const TOOL_ICONS = {
   list_assets: FileSearch,
   get_asset: FileSearch,
   search_inspiration: Search,
+  list_storyboards: List,
+  get_storyboard: FileText,
+  create_storyboard: Plus,
+  update_storyboard: Pencil,
+  update_shot: Pencil,
+  reorder_shots: ArrowUpDown,
+  delete_shot: Trash2,
+  reset_shot: RotateCcw,
+  reset_storyboard: RotateCcw,
+  restore_storyboard: History,
+  set_shot_asset: Layers,
 } as const;
 
 /** 外圈八格的顺时针顺序（跳过中间的 index 4） */

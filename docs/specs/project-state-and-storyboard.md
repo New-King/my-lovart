@@ -1,7 +1,7 @@
 # 项目状态、产物账本与分镜 · 设计
 
-> 状态：Phase 1c / 1d 已实现；2.5 待做  
-> 最后更新：2026-11-14  
+> 状态：Phase 1c / 1d / 2.5 已实现（分镜 UI 待做）
+> 最后更新：2026-11-15
 > 关联：`ROADMAP.md`、`docs/specs/golden-scenarios.md`、`docs/notes/M15.md`、`docs/notes/M16.md`
 
 ## 结论先行
@@ -232,7 +232,7 @@ create table storyboard_revisions (
 
 1. **Phase 1c 资产账本（先做）**：migration 0003、`title` 进入 artifact、`project_assets` 写入、`<project_assets>` 注入、`list_assets/get_asset`、画布 `customData.assetId`。这一步就能解决“上一轮生成的图和简介下一轮找不到”。
 2. **Phase 1d 执行记忆**：PostgresSaver + `thread_id`、上下文预算与工具消息裁剪。对齐 Lavart 并超过它。
-3. **Phase 2.5 分镜**：migration 0004（storyboards/shots/revisions）、分镜工具、`<project_state>` 注入；生成作业化之后再接批量分镜生成。
+3. **Phase 2.5 分镜（已完成，见 M21）**：migration `0009`（storyboards/shots/revisions）、分镜工具、`<project_state>` 注入；生成工具支持 `shotId` 并自动成为镜头当前版本。
 4. **Phase 3 工具深度**：画布 add_text/shape/line/update_style，和分镜镜头联动。
 
 ## 8. 验收场景

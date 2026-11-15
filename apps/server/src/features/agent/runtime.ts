@@ -37,6 +37,8 @@ export type AgentRunInput = {
   history: { role: "user" | "assistant"; content: string }[];
   canvasElements: unknown[];
   canvasFiles: Record<string, unknown>;
+  /** 结构化分镜摘要，构建 <project_state> 用 */
+  projectStateXml?: string;
   baseUrl: string;
   signal: AbortSignal;
   /** LangGraph checkpointer；有它时不再手工拼 history，避免重复 */
@@ -65,6 +67,17 @@ const KNOWN_TOOLS: ToolName[] = [
   "list_assets",
   "get_asset",
   "search_inspiration",
+  "list_storyboards",
+  "get_storyboard",
+  "create_storyboard",
+  "update_storyboard",
+  "update_shot",
+  "reorder_shots",
+  "delete_shot",
+  "reset_shot",
+  "reset_storyboard",
+  "restore_storyboard",
+  "set_shot_asset",
 ];
 
 function isKnownTool(name: string): name is ToolName {
@@ -161,6 +174,106 @@ function toolStartMeta(
         detail: "读取元素与位置",
         inputSummary: "读取当前场景的元素、位置和尺寸",
       };
+    case "list_storyboards":
+      return {
+        title: "查看分镜列表",
+        detail: "全部分镜",
+        inputSummary: "列出项目里的分镜与镜头数",
+      };
+    case "get_storyboard": {
+      const id = clip(args?.storyboardId, 40);
+      return {
+        title: "读取分镜",
+        detail: id ?? "",
+        ...(id ? { inputSummary: `分镜 id：${id}` } : {}),
+      };
+    }
+    case "create_storyboard": {
+      const shots = Array.isArray(args?.shots) ? args.shots.length : 0;
+      const title = clip(args?.title, 60);
+      return {
+        title: "创建分镜",
+        detail: title ? `${title} · ${shots} 个镜头` : `${shots} 个镜头`,
+        inputSummary: [
+          title ? `标题：${title}` : undefined,
+          clip(args?.brief, 200) ? `brief：${clip(args?.brief, 200)}` : undefined,
+          `${shots} 个镜头`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
+    case "update_storyboard": {
+      const id = clip(args?.storyboardId, 40);
+      return {
+        title: "更新分镜",
+        detail: id ?? "",
+        ...(id ? { inputSummary: `分镜 id：${id}` } : {}),
+      };
+    }
+    case "update_shot": {
+      const id = clip(args?.shotId, 40);
+      const changed = Object.keys(args ?? {}).filter((key) => key !== "shotId");
+      return {
+        title: "修改镜头",
+        detail: id ?? "",
+        inputSummary: [id ? `镜头 id：${id}` : undefined, `字段：${changed.join("、")}`]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
+    case "reorder_shots": {
+      const ids = Array.isArray(args?.shotIds) ? args.shotIds.length : 0;
+      const id = clip(args?.storyboardId, 40);
+      return {
+        title: "调整镜头顺序",
+        detail: `${ids} 个镜头`,
+        ...(id ? { inputSummary: `分镜 id：${id}\n新顺序：${ids} 个镜头` } : {}),
+      };
+    }
+    case "delete_shot": {
+      const id = clip(args?.shotId, 40);
+      return {
+        title: "删除镜头",
+        detail: id ?? "",
+        ...(id ? { inputSummary: `镜头 id：${id}` } : {}),
+      };
+    }
+    case "reset_shot": {
+      const id = clip(args?.shotId, 40);
+      return {
+        title: "重置镜头",
+        detail: id ?? "",
+        ...(id ? { inputSummary: `镜头 id：${id}` } : {}),
+      };
+    }
+    case "reset_storyboard": {
+      const id = clip(args?.storyboardId, 40);
+      return {
+        title: "重置分镜",
+        detail: id ?? "",
+        ...(id ? { inputSummary: `分镜 id：${id}` } : {}),
+      };
+    }
+    case "restore_storyboard": {
+      const revision = clip(args?.revisionId, 40);
+      return {
+        title: "恢复分镜",
+        detail: revision ?? "",
+        ...(revision ? { inputSummary: `版本：${revision}` } : {}),
+      };
+    }
+    case "set_shot_asset": {
+      const id = clip(args?.shotId, 40);
+      const asset = clip(args?.assetId, 40);
+      return {
+        title: "切换镜头版本",
+        detail: id ?? "",
+        inputSummary: [id ? `镜头：${id}` : undefined, asset ? `资产：${asset}` : undefined]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
     default:
       return null;
   }
@@ -175,6 +288,25 @@ function toolResultSummary(name: string, parsed: Record<string, unknown> | null)
     if (title) return `读取「${title}」`;
   }
   if (name === "inspect_canvas") return "已读取画布";
+  if (name === "list_storyboards") {
+    const count = Array.isArray(parsed?.storyboards) ? parsed.storyboards.length : 0;
+    return `${count} 个分镜`;
+  }
+  if (name === "get_storyboard") {
+    const shots = Array.isArray(parsed?.shots) ? parsed.shots.length : 0;
+    return `${shots} 个镜头`;
+  }
+  if (name === "create_storyboard") {
+    const shots = Array.isArray(parsed?.shots) ? parsed.shots.length : 0;
+    return `已创建 ${shots} 个镜头`;
+  }
+  if (name === "update_storyboard" || name === "update_shot") return "已更新";
+  if (name === "reorder_shots") return "已重排镜头";
+  if (name === "delete_shot") return "已删除镜头";
+  if (name === "reset_shot") return "已清空镜头当前版本";
+  if (name === "reset_storyboard") return "已重置分镜";
+  if (name === "restore_storyboard") return "已恢复分镜";
+  if (name === "set_shot_asset") return "已切换镜头版本";
   return undefined;
 }
 
@@ -247,6 +379,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     attachmentContext.xml,
     canvasContext.summary,
     canvasContext.xml,
+    input.projectStateXml ?? "",
     projectAssetsContext.xml,
     Object.keys(attachmentContext.map).length > 0,
   );
@@ -629,6 +762,7 @@ function buildUserText(
   attachmentXml: string,
   canvasSummary: string,
   canvasXml: string,
+  projectStateXml: string,
   projectAssetsXml: string,
   hasVision: boolean,
 ): string {
@@ -637,6 +771,12 @@ function buildUserText(
     blocks.push(`<canvas_state>\n${canvasSummary}\n</canvas_state>`);
   }
   if (canvasXml) blocks.push(canvasXml);
+  if (projectStateXml) {
+    blocks.push(projectStateXml);
+    blocks.push(
+      "<project_state_note>storyboard_id / shot_id 是稳定 id；改镜头前先用 get_storyboard 确认当前版本，不要凭记忆编 id。</project_state_note>",
+    );
+  }
   if (projectAssetsXml) {
     blocks.push(projectAssetsXml);
     blocks.push(

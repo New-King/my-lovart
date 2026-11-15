@@ -13,6 +13,9 @@ import { generateVideoWithMetaso } from "../generation/metaso-video.js";
 import { GenerationError, isAbortError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
 import { createJob, cancelJob, jobsEnabled, waitForJob } from "../jobs/jobs.js";
+import { getAssetsRepository } from "../assets/assets.repository.js";
+import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
+import { activeShots } from "../storyboards/storyboards.js";
 import type { AgentEventBus } from "./bus.js";
 import type { CanvasElementBrief } from "./context.js";
 
@@ -26,6 +29,11 @@ const imageSchema = z.object({
     .array(z.string())
     .optional()
     .describe("参考图的 asset_id（来自 <input_images> 或 <canvas_images>）或公网 URL；做图生图/改图时使用"),
+  shotId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("要挂到的分镜镜头 id；生成成功后自动成为该镜头当前版本"),
 });
 
 const videoSchema = z.object({
@@ -37,6 +45,11 @@ const videoSchema = z.object({
     .array(z.string())
     .optional()
     .describe("首帧/尾帧参考图（最多 2 张），asset_id 或公网 URL"),
+  shotId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("要挂到的分镜镜头 id；生成成功后自动成为该镜头当前版本"),
 });
 
 const canvasId = z
@@ -124,6 +137,96 @@ const getAssetSchema = z.object({
   assetId: z.string().min(1).describe("资产 id，来自 <project_assets> 或 list_assets 结果"),
 });
 
+const storyboardIdSchema = z.string().min(1).describe("分镜 id，来自 <project_state> 或 list_storyboards");
+
+const getStoryboardSchema = z.object({
+  storyboardId: storyboardIdSchema,
+});
+
+const shotInputSchema = z.object({
+  title: z.string().min(1).max(80).describe("镜头短标题"),
+  description: z.string().max(600).optional().describe("画面描述"),
+  prompt: z.string().max(2000).optional().describe("生图/生视频 prompt 草稿"),
+  durationSeconds: z.number().min(1).max(15).optional(),
+  camera: z.string().max(80).optional().describe("机位/运动，如 俯拍、推镜"),
+  transition: z.string().max(80).optional().describe("转场，如 叠化、切"),
+});
+
+const createStoryboardSchema = z.object({
+  title: z.string().min(1).max(80),
+  brief: z.string().min(1).max(1000).describe("分镜目标/用途"),
+  aspectRatio: z.enum(ASPECTS).optional(),
+  style: z.string().max(200).optional(),
+  shots: z.array(shotInputSchema).min(1).max(12),
+});
+
+const updateStoryboardSchema = z.object({
+  storyboardId: storyboardIdSchema,
+  title: z.string().min(1).max(80).optional(),
+  brief: z.string().max(1000).optional(),
+  aspectRatio: z.enum(ASPECTS).optional(),
+  style: z.string().max(200).optional(),
+  status: z.enum(["draft", "ready", "generating", "completed"]).optional(),
+  active: z.boolean().optional(),
+});
+
+const updateShotSchema = z.object({
+  shotId: z.string().min(1).describe("镜头 id，来自 get_storyboard"),
+  title: z.string().min(1).max(80).optional(),
+  description: z.string().max(600).optional(),
+  prompt: z.string().max(2000).optional(),
+  durationSeconds: z.number().min(1).max(15).optional(),
+  camera: z.string().max(80).optional(),
+  transition: z.string().max(80).optional(),
+  status: z.enum(["draft", "generating", "ready", "failed"]).optional(),
+});
+
+const reorderShotsSchema = z.object({
+  storyboardId: storyboardIdSchema,
+  shotIds: z.array(z.string().min(1)).min(1).max(12).describe("新顺序的镜头 id，必须覆盖当前所有镜头"),
+});
+
+const deleteShotSchema = z.object({
+  shotId: z.string().min(1),
+  confirm: z.boolean().describe("只有用户明确确认删除后才传 true"),
+});
+
+const resetShotSchema = z.object({
+  shotId: z.string().min(1),
+});
+
+const resetStoryboardSchema = z.object({
+  storyboardId: storyboardIdSchema,
+  confirm: z.boolean().describe("只有用户明确确认清空当前版本后才传 true"),
+});
+
+const restoreStoryboardSchema = z.object({
+  storyboardId: storyboardIdSchema,
+  revisionId: z.string().min(1).describe("历史版本 id，来自 get_storyboard 的 revisions"),
+});
+
+const setShotAssetSchema = z.object({
+  shotId: z.string().min(1),
+  assetId: z.string().min(1).describe("要设为该镜头当前版本的资产 id"),
+});
+
+async function attachArtifactToShot(
+  projectId: string,
+  shotId: string | undefined,
+  assetId: string,
+): Promise<void> {
+  if (!shotId) return;
+  try {
+    const repo = await getStoryboardsRepository();
+    await repo.applyAssetToShot(projectId, shotId, assetId);
+  } catch (err) {
+    console.warn(
+      "[storyboards] 生成资产挂镜头失败：",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 type ToolContext = {
   bus: AgentEventBus;
   projectId: string;
@@ -160,6 +263,7 @@ export function createAgentTools(context: ToolContext) {
                 aspectRatio: input.aspectRatio,
                 inputImages: referenceImages,
                 sourceAssetIds: input.inputImages ?? [],
+                ...(input.shotId ? { shotId: input.shotId } : {}),
               },
             });
             const finished = await waitForJob(context.projectId, job.id, {
@@ -183,6 +287,11 @@ export function createAgentTools(context: ToolContext) {
                 artifact?: ImageBlock;
               };
               if (result?.artifact) {
+                await attachArtifactToShot(
+                  context.projectId,
+                  input.shotId,
+                  result.artifact.id,
+                );
                 return JSON.stringify({
                   summary: `已生成图片「${result.artifact.title ?? input.title}」并放到画布。`,
                   artifact: result.artifact,
@@ -245,7 +354,10 @@ export function createAgentTools(context: ToolContext) {
             model: "Seedream 5.0 Lite",
             aspectRatio: input.aspectRatio,
             sourceAssetIds: input.inputImages ?? [],
+            ...(input.shotId ? { shotId: input.shotId } : {}),
           };
+
+          await attachArtifactToShot(context.projectId, input.shotId, artifact.id);
 
           return JSON.stringify({
             summary: `已生成图片「${input.title}」，${result.width}×${result.height}。`,
@@ -287,6 +399,7 @@ export function createAgentTools(context: ToolContext) {
                 durationSeconds: input.durationSeconds ?? 8,
                 inputImages: referenceImages,
                 sourceAssetIds: input.inputImages ?? [],
+                ...(input.shotId ? { shotId: input.shotId } : {}),
               },
             });
             const finished = await waitForJob(context.projectId, job.id, {
@@ -310,6 +423,11 @@ export function createAgentTools(context: ToolContext) {
                 artifact?: VideoBlock;
               };
               if (result?.artifact) {
+                await attachArtifactToShot(
+                  context.projectId,
+                  input.shotId,
+                  result.artifact.id,
+                );
                 return JSON.stringify({
                   summary: `已生成视频「${result.artifact.title ?? input.title}」。`,
                   artifact: result.artifact,
@@ -374,7 +492,10 @@ export function createAgentTools(context: ToolContext) {
             prompt: input.prompt.slice(0, 2000),
             model: "MiniMax H3",
             sourceAssetIds: input.inputImages ?? [],
+            ...(input.shotId ? { shotId: input.shotId } : {}),
           };
+
+          await attachArtifactToShot(context.projectId, input.shotId, artifact.id);
 
           return JSON.stringify({
             summary: `已生成视频「${input.title}」，${result.durationSeconds} 秒。`,
@@ -497,6 +618,367 @@ export function createAgentTools(context: ToolContext) {
         description:
           "按资产 id 取完整 prompt、模型、尺寸和来源血缘。用户要基于某张旧图重做、对比版本或引用分镜镜头资产时调用。",
         schema: getAssetSchema,
+      },
+    ),
+    tool(
+      async () => {
+        const repo = await getStoryboardsRepository();
+        const boards = await repo.list(context.projectId);
+        return JSON.stringify({
+          count: boards.length,
+          storyboards: boards.map((board) => ({
+            storyboard_id: board.id,
+            title: board.title,
+            brief: board.brief.slice(0, 120),
+            status: board.status,
+            active: board.active,
+            ...(board.aspectRatio ? { aspect_ratio: board.aspectRatio } : {}),
+            ...(board.style ? { style: board.style } : {}),
+            shots: board.shotCount,
+            ready: board.readyCount,
+            updated_at: board.updatedAt,
+          })),
+        });
+      },
+      {
+        name: "list_storyboards",
+        description:
+          "列出项目里的分镜摘要（标题、状态、镜头数）。用户提到“另一个分镜/之前那个片子”或要按标题定位时先调用。",
+        schema: z.object({}),
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const detail = await repo.get(context.projectId, input.storyboardId);
+          if (!detail) return JSON.stringify({ error: "找不到这个分镜" });
+          const shots = activeShots(detail);
+          const assets = await (await getAssetsRepository()).list(context.projectId, 80);
+          const byShot = new Map<string, typeof assets>();
+          for (const asset of assets) {
+            if (!asset.shotId) continue;
+            const list = byShot.get(asset.shotId) ?? [];
+            list.push(asset);
+            byShot.set(asset.shotId, list);
+          }
+          const revisions = await repo.listRevisions(
+            context.projectId,
+            input.storyboardId,
+            10,
+          );
+          return JSON.stringify({
+            storyboard: {
+              storyboard_id: detail.storyboard.id,
+              title: detail.storyboard.title,
+              brief: detail.storyboard.brief,
+              status: detail.storyboard.status,
+              active: detail.storyboard.active,
+              ...(detail.storyboard.aspectRatio
+                ? { aspect_ratio: detail.storyboard.aspectRatio }
+                : {}),
+              ...(detail.storyboard.style ? { style: detail.storyboard.style } : {}),
+            },
+            shots: shots.map((shot) => ({
+              shot_id: shot.id,
+              order: shot.orderIndex,
+              title: shot.title,
+              status: shot.status,
+              description: shot.description,
+              ...(shot.prompt ? { prompt: shot.prompt.slice(0, 600) } : {}),
+              ...(shot.durationSeconds ? { duration_seconds: shot.durationSeconds } : {}),
+              ...(shot.camera ? { camera: shot.camera } : {}),
+              ...(shot.transition ? { transition: shot.transition } : {}),
+              ...(shot.activeAssetId ? { active_asset_id: shot.activeAssetId } : {}),
+              versions: (byShot.get(shot.id) ?? []).slice(0, 6).map((asset) => ({
+                asset_id: asset.id,
+                kind: asset.kind,
+                title: asset.title,
+                created_at: asset.createdAt,
+                active: asset.id === shot.activeAssetId,
+              })),
+            })),
+            revisions: revisions.map((revision) => ({
+              revision_id: revision.id,
+              reason: revision.reason,
+              created_at: revision.createdAt,
+            })),
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "读取分镜失败",
+          });
+        }
+      },
+      {
+        name: "get_storyboard",
+        description:
+          "取分镜 + 全部镜头 + 每个镜头的历史版本 + 最近 revisions。改镜头、回退版本、判断当前 active 资产前必须调用。",
+        schema: getStoryboardSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const detail = await repo.create(context.projectId, {
+            title: input.title,
+            brief: input.brief,
+            ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+            ...(input.style ? { style: input.style } : {}),
+            shots: input.shots,
+          });
+          return JSON.stringify({
+            storyboard_id: detail.storyboard.id,
+            title: detail.storyboard.title,
+            shots: activeShots(detail).map((shot) => ({
+              shot_id: shot.id,
+              order: shot.orderIndex,
+              title: shot.title,
+            })),
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "创建分镜失败",
+          });
+        }
+      },
+      {
+        name: "create_storyboard",
+        description:
+          "创建结构化分镜和镜头草稿。用户确认分镜方向后调用；一次 1-12 个镜头，每个镜头先写标题/描述/prompt 草稿，不直接批量生成。",
+        schema: createStoryboardSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const { storyboardId, ...patch } = input;
+          const repo = await getStoryboardsRepository();
+          const detail = await repo.updateStoryboard(context.projectId, storyboardId, patch);
+          return JSON.stringify({
+            storyboard_id: detail.storyboard.id,
+            title: detail.storyboard.title,
+            status: detail.storyboard.status,
+            active: detail.storyboard.active,
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "更新分镜失败",
+          });
+        }
+      },
+      {
+        name: "update_storyboard",
+        description: "改分镜标题、brief、画幅、风格、状态或 active。只传要改的字段。",
+        schema: updateStoryboardSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const { shotId, ...patch } = input;
+          const repo = await getStoryboardsRepository();
+          const shot = await repo.updateShot(context.projectId, shotId, patch);
+          return JSON.stringify({
+            shot_id: shot.id,
+            order: shot.orderIndex,
+            title: shot.title,
+            status: shot.status,
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "更新镜头失败",
+          });
+        }
+      },
+      {
+        name: "update_shot",
+        description:
+          "只改一个镜头的文字/时长/机位/转场。改第 N 个镜头时必须先用 get_storyboard 找到 shot_id，不要猜。",
+        schema: updateShotSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const detail = await repo.reorder(
+            context.projectId,
+            input.storyboardId,
+            input.shotIds,
+          );
+          return JSON.stringify({
+            storyboard_id: detail.storyboard.id,
+            order: activeShots(detail).map((shot) => ({
+              shot_id: shot.id,
+              order: shot.orderIndex,
+              title: shot.title,
+            })),
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "调整镜头顺序失败",
+          });
+        }
+      },
+      {
+        name: "reorder_shots",
+        description:
+          "重排镜头顺序；shotIds 必须覆盖当前所有镜头。先 get_storyboard 拿完整列表，不要漏镜头。",
+        schema: reorderShotsSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          if (!input.confirm) {
+            const found = await repo.getShot(context.projectId, input.shotId);
+            return JSON.stringify({
+              error: "需要用户确认后才能删除镜头",
+              code: "confirmation_required",
+              shot: found
+                ? { shot_id: found.shot.id, title: found.shot.title }
+                : undefined,
+            });
+          }
+          await repo.deleteShot(context.projectId, input.shotId);
+          return JSON.stringify({ deleted: true, shot_id: input.shotId });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "删除镜头失败",
+          });
+        }
+      },
+      {
+        name: "delete_shot",
+        description:
+          "软删除一个镜头。必须先向用户说明影响并得到明确确认，再传 confirm=true。",
+        schema: deleteShotSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const shot = await repo.resetShot(context.projectId, input.shotId);
+          return JSON.stringify({
+            shot_id: shot.id,
+            title: shot.title,
+            status: shot.status,
+            active_asset_id: null,
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "重置镜头失败",
+          });
+        }
+      },
+      {
+        name: "reset_shot",
+        description:
+          "清空一个镜头的当前版本并回到 draft；历史资产仍保留，可用 set_shot_asset 切回。",
+        schema: resetShotSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          if (!input.confirm) {
+            const detail = await repo.get(context.projectId, input.storyboardId);
+            const shots = detail ? activeShots(detail) : [];
+            return JSON.stringify({
+              error: "需要用户确认后才能重置整个分镜",
+              code: "confirmation_required",
+              impact: {
+                shots: shots.length,
+                active_versions: shots.filter((shot) => shot.activeAssetId).length,
+                note: "历史资产会保留，只清空各镜头当前版本",
+              },
+            });
+          }
+          const detail = await repo.resetStoryboard(
+            context.projectId,
+            input.storyboardId,
+          );
+          return JSON.stringify({
+            storyboard_id: detail.storyboard.id,
+            status: detail.storyboard.status,
+            shots: activeShots(detail).length,
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "重置分镜失败",
+          });
+        }
+      },
+      {
+        name: "reset_storyboard",
+        description:
+          "重置整个分镜：先说明会清空几个镜头/几版当前资产，用户确认后传 confirm=true。历史资产不删除。",
+        schema: resetStoryboardSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const detail = await repo.restoreStoryboard(
+            context.projectId,
+            input.storyboardId,
+            input.revisionId,
+          );
+          return JSON.stringify({
+            storyboard_id: detail.storyboard.id,
+            title: detail.storyboard.title,
+            shots: activeShots(detail).map((shot) => ({
+              shot_id: shot.id,
+              order: shot.orderIndex,
+              title: shot.title,
+              active_asset_id: shot.activeAssetId ?? null,
+            })),
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "恢复分镜失败",
+          });
+        }
+      },
+      {
+        name: "restore_storyboard",
+        description:
+          "把分镜恢复到某个 revision（来自 get_storyboard 的 revisions）。恢复前会先保存当前状态，可再次反悔。",
+        schema: restoreStoryboardSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        try {
+          const repo = await getStoryboardsRepository();
+          const shot = await repo.setShotAsset(
+            context.projectId,
+            input.shotId,
+            input.assetId,
+          );
+          return JSON.stringify({
+            shot_id: shot.id,
+            title: shot.title,
+            active_asset_id: shot.activeAssetId,
+            status: shot.status,
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: err instanceof Error ? err.message : "切换镜头版本失败",
+          });
+        }
+      },
+      {
+        name: "set_shot_asset",
+        description:
+          "把某个历史资产设为镜头当前版本（版本回退），不重新生成。asset_id 来自 get_storyboard 的 versions。",
+        schema: setShotAssetSchema,
       },
     ),
     tool(

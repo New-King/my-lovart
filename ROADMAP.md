@@ -34,7 +34,7 @@
 - [x] 输入框收敛为 + / 发送，画幅交给模型
 - [x] 持久化线程与画布/文件
 - [x] 产物账本（标题/prompt/模型/血缘/版本）
-- [ ] 分镜与镜头状态
+- [x] 分镜与镜头状态（结构化仓库 + 工具 + 上下文；分镜 UI 待做）
 - [x] 生成作业队列（图片/视频；视频画布 embeddable 与内联播放已做，真机待验）
 - [x] 生成过程单行动态状态（流光 + 秒数），默认折叠；所有工具步骤可展开输入/输出
 - [x] 画布 revision 乐观锁 + 跨进程刷新；生成图落画布后前端聚焦并提示
@@ -118,14 +118,14 @@
 
 目标：分镜不是一长串自然语言，而是可查询、可重置、可回退的结构化状态。
 
-- [ ] migration 0004：`storyboards` / `storyboard_shots` / `storyboard_revisions`
-- [ ] `get_storyboard` / `create_storyboard` / `update_shot` / `reorder_shots`
-- [ ] `reset_shot` / `reset_storyboard` / `restore_storyboard` / `set_shot_asset`
-- [ ] 每轮注入 `<project_state>` 分镜摘要
-- [ ] 生成工具支持 `shotId` / `sourceAssetIds`，结果自动挂到镜头 active
-- [ ] 跑 G17–G21、G23
+- [x] migration `0009`：`storyboards` / `storyboard_shots` / `storyboard_revisions`（原计划 0004 已被 thread_id 占用）
+- [x] `get_storyboard` / `create_storyboard` / `update_shot` / `reorder_shots`
+- [x] `reset_shot` / `reset_storyboard` / `restore_storyboard` / `set_shot_asset`
+- [x] 每轮注入 `<project_state>` 分镜摘要（只展开 active 分镜）
+- [x] 生成工具支持 `shotId`，结果自动挂到镜头 active（图片真实生成已验证）
+- [ ] 跑 G17–G21、G23（G17/G18/G19/G20 已通过；G21/G23 待补）
 
-验收：能改第 3 个镜头、重置后恢复、在两个分镜之间精确切换，不靠模型记忆猜。
+验收：能改第 3 个镜头、重置后恢复、在两个分镜之间精确切换，不靠模型记忆猜。真实模型已验证（`docs/notes/M21.md`）。
 
 ## Phase 3 · 工具深度
 
@@ -162,5 +162,5 @@
 
 ## 下一步（只做这一件）
 
-Phase 2b：视频画布元素与内联播放；把 worker 进度映射到工具卡片；构造一次真实超时/取消验证。  
-完成后进入 Phase 2.5 分镜。
+Phase 3：画布工具深度（add_text / add_shape / add_line / update_style / update_text）。
+视频真机播放与生成中取消留给用户单独测；分镜 UI 作为后续 Phase 4 的一部分。

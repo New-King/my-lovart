@@ -17,6 +17,8 @@ import {
 } from "../assets/assets.js";
 import { getAssetsRepository } from "../assets/assets.repository.js";
 import { normalizeAttachment } from "../files/file.store.js";
+import { buildProjectStateContext } from "../storyboards/storyboards.context.js";
+import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
 import { createMockRun, type MockKind } from "./mock-agent.js";
 import {
   MAX_CONTEXT_MESSAGES,
@@ -352,6 +354,26 @@ export function createWorkspaceService(
         collectLegacyAssets(ensureWorkspace(projectId).messages),
       );
 
+      let projectState = {
+        xml: "",
+        summary: "",
+        storyboardCount: 0,
+      } as ReturnType<typeof buildProjectStateContext>;
+      try {
+        const storyboards = await getStoryboardsRepository();
+        const boards = await storyboards.list(projectId);
+        const activeSummary = boards.find((board) => board.active) ?? boards[0];
+        const activeDetail = activeSummary
+          ? await storyboards.get(projectId, activeSummary.id)
+          : null;
+        projectState = buildProjectStateContext(boards, activeDetail);
+      } catch (err) {
+        console.warn(
+          "[storyboards] 分镜上下文加载失败：",
+          err instanceof Error ? err.message : err,
+        );
+      }
+
       const checkpointer = env.generationMode === "real" ? await loadCheckpointer() : null;
       const threadId = checkpointer ? await ensureThreadId(projectId, repo) : undefined;
 
@@ -376,6 +398,9 @@ export function createWorkspaceService(
         historyCount: history.length,
         historyChars,
         projectAssetCount: projectAssets.length,
+        storyboardCount: projectState.storyboardCount,
+        activeStoryboardId: projectState.activeStoryboardId,
+        projectStateSummary: projectState.summary,
         checkpointer: Boolean(checkpointer),
         threadId,
         history: history.map((message) => ({
@@ -451,6 +476,7 @@ export function createWorkspaceService(
             history,
             canvasElements: ensureWorkspace(projectId).elements,
             canvasFiles: ensureWorkspace(projectId).files,
+            projectStateXml: projectState.xml,
             baseUrl,
             signal,
             trace,
@@ -571,6 +597,7 @@ function assetFromArtifact(
       ? { aspectRatio: artifact.aspectRatio }
       : {}),
     sourceAssetIds: artifact.sourceAssetIds ?? [],
+    ...(artifact.shotId ? { shotId: artifact.shotId } : {}),
     messageId,
     metadata: artifact.batchId ? { batchId: artifact.batchId } : {},
     createdAt: at,

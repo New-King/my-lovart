@@ -18,7 +18,18 @@ export type ToolName =
   | "offer_choices"
   | "list_assets"
   | "get_asset"
-  | "search_inspiration";
+  | "search_inspiration"
+  | "list_storyboards"
+  | "get_storyboard"
+  | "create_storyboard"
+  | "update_storyboard"
+  | "update_shot"
+  | "reorder_shots"
+  | "delete_shot"
+  | "reset_shot"
+  | "reset_storyboard"
+  | "restore_storyboard"
+  | "set_shot_asset";
 export type ToolStatus = "queued" | "running" | "done" | "failed";
 
 export type ToolBlock = {
@@ -59,6 +70,8 @@ export type ImageBlock = {
   aspectRatio?: string;
   /** 图生图/参考图来源的稳定 id，不是画布 elementId */
   sourceAssetIds?: string[];
+  /** 生成时挂到哪个分镜镜头；worker/账本用于自动成为镜头当前版本 */
+  shotId?: string;
   /** 服务端已落画布时的元素 id；前端据此只刷新，不重复插入 */
   elementId?: string;
   placement?: { x: number; y: number; width: number; height: number };
@@ -79,6 +92,8 @@ export type VideoBlock = {
   prompt?: string;
   model?: string;
   sourceAssetIds?: string[];
+  /** 生成时挂到哪个分镜镜头 */
+  shotId?: string;
   /** 服务端已落画布时的 embeddable 元素 id */
   elementId?: string;
   placement?: { x: number; y: number; width: number; height: number };

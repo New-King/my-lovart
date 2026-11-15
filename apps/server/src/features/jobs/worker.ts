@@ -9,6 +9,7 @@ import { importRemoteFile } from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
 import { GenerationError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
+import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
 import {
   claimNextJob,
   getJob,
@@ -41,6 +42,23 @@ async function reportProgress(
       err instanceof Error ? err.message : err,
     );
   });
+}
+
+async function attachToShot(
+  projectId: string,
+  shotId: string,
+  assetId: string,
+): Promise<void> {
+  if (!shotId) return;
+  try {
+    const repo = await getStoryboardsRepository();
+    await repo.applyAssetToShot(projectId, shotId, assetId);
+  } catch (err) {
+    console.warn(
+      "[worker] 资产挂分镜失败：",
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 /**
@@ -109,6 +127,7 @@ function assetFromArtifact(
       ? { aspectRatio: artifact.aspectRatio }
       : {}),
     sourceAssetIds: artifact.sourceAssetIds ?? [],
+    ...(artifact.shotId ? { shotId: artifact.shotId } : {}),
     metadata: { job: true },
     createdAt: new Date().toISOString(),
   };
@@ -126,6 +145,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
   const payload = job.payload;
   const prompt = asString(payload.prompt);
   const title = asString(payload.title) || prompt.slice(0, 30) || "生成图像";
+  const shotId = asString(payload.shotId);
   if (!prompt) throw new Error("job payload 缺少 prompt");
 
   const inputImages = Array.isArray(payload.inputImages)
@@ -166,6 +186,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     model: "Seedream 5.0 Lite",
     aspectRatio: asString(payload.aspectRatio) || "3:4",
     sourceAssetIds,
+    ...(shotId ? { shotId } : {}),
   };
 
   await reportProgress(job, 92, "落画布");
@@ -195,6 +216,8 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
       console.warn("[worker] 资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
+  if (shotId) await attachToShot(job.projectId, shotId, artifact.id);
+
   return { artifact, jobId: job.id, ...(placed ? { elementId: placed.elementId, placement: placed.placement } : {}) };
 }
 
@@ -202,6 +225,7 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
   const payload = job.payload;
   const prompt = asString(payload.prompt);
   const title = asString(payload.title) || prompt.slice(0, 30) || "生成视频";
+  const shotId = asString(payload.shotId);
   if (!prompt) throw new Error("job payload 缺少 prompt");
   const inputImages = Array.isArray(payload.inputImages)
     ? payload.inputImages.filter((item): item is string => typeof item === "string").slice(0, 2)
@@ -245,6 +269,7 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     prompt: prompt.slice(0, 2000),
     model: "MiniMax H3",
     sourceAssetIds,
+    ...(shotId ? { shotId } : {}),
   };
 
   await reportProgress(job, 94, "落画布");
@@ -276,6 +301,8 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     .catch((err) => {
       console.warn("[worker] 视频资产落账本失败：", err instanceof Error ? err.message : err);
     });
+
+  if (shotId) await attachToShot(job.projectId, shotId, artifact.id);
 
   return {
     artifact,
