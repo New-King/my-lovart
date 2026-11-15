@@ -310,6 +310,7 @@ export function createWorkspaceService(
       await refreshCanvas(projectId, repo);
       const runId = randomUUID();
       const messageId = randomUUID();
+      const runStartedAt = new Date().toISOString();
       startAssistantMessage(projectId, messageId);
       await persistMessage(repo, projectId, messageId);
 
@@ -465,6 +466,7 @@ export function createWorkspaceService(
             runId,
             messageId,
             projectId,
+            runStartedAt,
             text: input.text,
             kind: input.kind,
             aspectRatio: input.aspectRatio,

@@ -11,6 +11,7 @@
     "verify:persistence": "pnpm build && node --env-file=../../.env.local ./scripts/verify-persistence.mjs",
     "verify:attachments": "pnpm build && node --env-file=../../.env.local ./scripts/verify-attachments.mjs",
     "verify:assets": "pnpm build && node --env-file=../../.env.local ./scripts/verify-assets.mjs",
+    "verify:video-guard": "pnpm build && node --env-file=../../.env.local ./scripts/verify-video-guard.mjs",
     "trace:latest": "node ./scripts/trace-latest.mjs"
   },
   "dependencies": {

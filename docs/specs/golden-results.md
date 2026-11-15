@@ -35,6 +35,8 @@
 | G28 视频落画布 | 通过（插入链路，未真机播放） | 临时项目 `insertVideoOnCanvas`：embeddable 元素、revision=1、isVideo/link/duration 正确；上下文识别为 1 条视频；播放器 UI 待用户验证（`docs/notes/M20.md`） |
 | G29 进度与取消 | 部分（进度通过，取消未真测） | 模拟 running job：progress/stage 回调、succeeded/100 通过；worker 取消 abort 已实现，真实视频取消按约定留给用户测 |
 
+| G30 视频前期闸门 | 通过（6/6，脚本验收） | 无 shotId、本轮新建镜头、缺首帧、本轮新首帧均被拦；上轮脚本+首帧放行；`direct=true` 显式跳过。不调用视频服务（`docs/notes/M22.md`） |
+
 ## 当前失败/缺口
 
 1. G10/G11/G12 需要自动化或可重复手测脚本，避免每次靠人工。

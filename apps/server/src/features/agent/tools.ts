@@ -50,6 +50,11 @@ const videoSchema = z.object({
     .min(1)
     .optional()
     .describe("要挂到的分镜镜头 id；生成成功后自动成为该镜头当前版本"),
+  direct: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("只有用户明确说“直接出片/不用确认”时才传 true；默认 false，必须先确认脚本和首帧关键图"),
 });
 
 const canvasId = z
@@ -227,9 +232,66 @@ async function attachArtifactToShot(
   }
 }
 
+export async function checkVideoPreflight(
+  context: ToolContext,
+  shotId: string | undefined,
+  direct: boolean,
+): Promise<Record<string, unknown> | null> {
+  if (direct) return null;
+  if (!shotId) {
+    return {
+      error:
+        "视频不能直接生成。先写 1 个镜头的脚本（或分镜），生成首帧关键图，让用户确认脚本和画面后再生成视频。",
+      code: "video_plan_required",
+      next: "create_storyboard → generate_image(shotId) → 等用户确认 → generate_video(shotId)",
+    };
+  }
+  const repo = await getStoryboardsRepository();
+  const found = await repo.getShot(context.projectId, shotId);
+  if (!found) {
+    return { error: "找不到这个镜头，不能生成视频", code: "invalid_shot" };
+  }
+  const createdAt = new Date(found.shot.createdAt).getTime();
+  const runStartedAt = new Date(context.runStartedAt).getTime();
+  if (Number.isFinite(createdAt) && createdAt >= runStartedAt - 2000) {
+    return {
+      error:
+        "这个镜头是本轮刚建的计划，用户还没看到脚本。先把脚本/镜头列表发给用户并停止，等下一轮确认后再生成视频。",
+      code: "video_plan_unconfirmed",
+      shot_id: found.shot.id,
+    };
+  }
+  let keyframe: ProjectAsset | null = null;
+  if (found.shot.activeAssetId) {
+    keyframe = await (await getAssetsRepository()).get(
+      context.projectId,
+      found.shot.activeAssetId,
+    );
+  }
+  if (!keyframe || keyframe.kind !== "image") {
+    return {
+      error:
+        "这个镜头还没有首帧关键图。先用 generate_image 给该 shotId 生成一张关键画面，展示给用户确认，再生成视频。",
+      code: "keyframe_required",
+      shot_id: found.shot.id,
+    };
+  }
+  const keyframeCreatedAt = new Date(keyframe.createdAt).getTime();
+  if (Number.isFinite(keyframeCreatedAt) && keyframeCreatedAt >= runStartedAt - 2000) {
+    return {
+      error:
+        "首帧关键图是本轮刚生成的，用户还没看到画面。先把脚本和关键图发给用户并停止，等下一轮确认后再生成视频。",
+      code: "keyframe_unconfirmed",
+      shot_id: found.shot.id,
+    };
+  }
+  return null;
+}
+
 type ToolContext = {
   bus: AgentEventBus;
   projectId: string;
+  runStartedAt: string;
   threadId?: string;
   attachmentMap: Record<string, string>;
   canvasSummary: string;
@@ -377,6 +439,13 @@ export function createAgentTools(context: ToolContext) {
     ),
     tool(
       async (input) => {
+        const preflight = await checkVideoPreflight(
+          context,
+          input.shotId,
+          input.direct ?? false,
+        );
+        if (preflight) return JSON.stringify(preflight);
+
         const referenceImages = (
           await resolveReferences(
             input.inputImages,
@@ -509,7 +578,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_video",
         description:
-          "生成一条短视频。用户明确要视频、短片、动效时调用。支持首帧/尾帧参考图，最多 2 张。",
+          "生成一条短视频。必须先有已确认的镜头脚本和首帧关键图：第一次只写脚本 + 出关键图并停下来等用户确认，下一轮用户确认后再带 shotId 调用。只有用户明确说“直接出片/不用确认”才能传 direct=true 跳过。",
         schema: videoSchema,
       },
     ),

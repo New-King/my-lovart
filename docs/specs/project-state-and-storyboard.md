@@ -233,7 +233,8 @@ create table storyboard_revisions (
 1. **Phase 1c 资产账本（先做）**：migration 0003、`title` 进入 artifact、`project_assets` 写入、`<project_assets>` 注入、`list_assets/get_asset`、画布 `customData.assetId`。这一步就能解决“上一轮生成的图和简介下一轮找不到”。
 2. **Phase 1d 执行记忆**：PostgresSaver + `thread_id`、上下文预算与工具消息裁剪。对齐 Lavart 并超过它。
 3. **Phase 2.5 分镜（已完成，见 M21）**：migration `0009`（storyboards/shots/revisions）、分镜工具、`<project_state>` 注入；生成工具支持 `shotId` 并自动成为镜头当前版本。
-4. **Phase 3 工具深度**：画布 add_text/shape/line/update_style，和分镜镜头联动。
+4. **视频前期闸门（已完成，见 M22）**：`generate_video` 要求上一轮已确认的镜头脚本 + 首帧关键图；本轮新建/新图也拦下，只有明确要求跳过才放行。
+5. **Phase 3 工具深度**：画布 add_text/shape/line/update_style，和分镜镜头联动。
 
 ## 8. 验收场景
 

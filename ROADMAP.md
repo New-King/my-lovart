@@ -123,6 +123,7 @@
 - [x] `reset_shot` / `reset_storyboard` / `restore_storyboard` / `set_shot_asset`
 - [x] 每轮注入 `<project_state>` 分镜摘要（只展开 active 分镜）
 - [x] 生成工具支持 `shotId`，结果自动挂到镜头 active（图片真实生成已验证）
+- [x] 视频前期闸门：脚本 + 首帧未确认时拒绝 `generate_video`，`direct=true` 才可跳过（M22，6/6 脚本验收）
 - [ ] 跑 G17–G21、G23（G17/G18/G19/G20 已通过；G21/G23 待补）
 
 验收：能改第 3 个镜头、重置后恢复、在两个分镜之间精确切换，不靠模型记忆猜。真实模型已验证（`docs/notes/M21.md`）。

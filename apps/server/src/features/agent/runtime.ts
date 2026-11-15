@@ -28,6 +28,8 @@ export type AgentRunInput = {
   runId: string;
   messageId: string;
   projectId: string;
+  /** 本次 run 开始时间；视频预检用它判断分镜计划是不是刚创建、未经过用户确认 */
+  runStartedAt: string;
   text: string;
   kind: "auto" | "image" | "video";
   aspectRatio?: AspectRatio;
@@ -349,6 +351,7 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   const tools = createAgentTools({
     bus,
     projectId: input.projectId,
+    runStartedAt: input.runStartedAt,
     ...(input.threadId ? { threadId: input.threadId } : {}),
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
     canvasSummary: canvasContext.summary,

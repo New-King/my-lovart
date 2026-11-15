@@ -202,3 +202,10 @@
 - 上下文：视频作业 running，provider 排队/渲染
 - 期望：job 的 progress/stage 被 worker 写回；工具行显示阶段和百分比；取消后 job=canceled，worker abort provider，不再落资产/画布
 - 禁止：工具卡片从头到尾只有“渲染中”；取消后仍 successful；取消状态被收尾错误覆盖成 failed
+## G30 视频前期闸门
+
+- 上下文：用户要一条 5 秒视频，直接（或答完需求问题后）要求出片
+- 期望：不调用 `generate_video`；先给脚本（含节拍）、建 1 个镜头、出首帧关键图，并明确请用户确认后停止；下一轮确认后才出片
+- 服务端：`generate_video` 在无 `shotId`、镜头本轮新建、缺首帧、首帧本轮新出时返回 `video_plan_required` / `video_plan_unconfirmed` / `keyframe_required` / `keyframe_unconfirmed`，不提交作业
+- 例外：用户明确说“直接出片/不用确认”时才允许 `direct=true`
+- 禁止：答完问题当轮直接出片；没有脚本/关键图就调用视频；本轮说“确认后出片”却已提交作业
