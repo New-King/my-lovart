@@ -150,7 +150,7 @@ export function ProjectRail({
               return (
                 <div
                   key={p.id}
-                  className="mb-0.5 flex items-center gap-1 rounded-lg bg-surface px-1.5 py-1 shadow-[inset_0_0_0_1px_var(--color-line)]"
+                  className="mb-0.5 flex h-9 items-center gap-1 rounded-lg bg-surface px-1.5 shadow-[inset_0_0_0_1px_var(--color-line)] lg:h-8"
                 >
                   <input
                     ref={inputRef}
@@ -172,7 +172,7 @@ export function ProjectRail({
                       }
                       void commitRename();
                     }}
-                    className="min-w-0 flex-1 rounded-md border border-line bg-canvas px-1.5 py-1 text-[13px] text-ink outline-none"
+                    className="h-6 min-w-0 flex-1 rounded-md bg-canvas px-1.5 text-[13px] text-ink shadow-[inset_0_0_0_1px_var(--color-line)] outline-none"
                   />
                   {saving ? (
                     <Loader2 className="size-3.5 shrink-0 animate-spin text-muted" />
@@ -195,7 +195,7 @@ export function ProjectRail({
               return (
                 <div
                   key={p.id}
-                  className="mb-0.5 flex items-center gap-1 rounded-lg bg-surface px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--color-line)] lg:py-1"
+                  className="mb-0.5 flex h-9 items-center gap-1 rounded-lg bg-surface px-2 shadow-[inset_0_0_0_1px_var(--color-line)] lg:h-8"
                 >
                   <span className="min-w-0 flex-1 truncate text-[12px] text-muted">
                     删除「{p.name}」？
@@ -228,27 +228,25 @@ export function ProjectRail({
             return (
               <div
                 key={p.id}
-                className={`group relative mb-0.5 flex items-center rounded-lg ${
-                  active
-                    ? "bg-surface shadow-[inset_0_0_0_1px_var(--color-line)]"
-                    : "hover:bg-surface/70"
+                className={`group relative mb-0.5 flex h-9 items-center rounded-lg lg:h-8 ${
+                  active ? "bg-surface" : "hover:bg-surface/70"
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => onSelect(p.id)}
-                  className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] lg:py-[7px] ${
+                  className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-[13px] ${
                     active ? "" : "text-muted transition-colors group-hover:text-ink"
                   }`}
                 >
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <span className="shrink-0 text-[11px] text-faint transition-opacity group-hover:opacity-0">
+                  <span className="shrink-0 text-[11px] text-faint transition-opacity group-hover:opacity-0 max-sm:opacity-0">
                     {p.isDraft ? "未保存" : relativeTime(p.updatedAt)}
                   </span>
                 </button>
 
                 {!draft && (
-                  <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-surface/95 px-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 max-sm:opacity-100">
+                  <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 max-sm:opacity-100">
                     <button
                       type="button"
                       onClick={() => startRename(p)}
