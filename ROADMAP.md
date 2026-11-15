@@ -20,6 +20,7 @@
 3. 每一阶段必须有验收标准、typecheck、真实模型手测、独立 git 提交。
 4. 计划、状态、下一步只写进本文件和 `docs/specs/`，不依赖聊天上下文。
 5. 不引入 skills / 品牌套件 / 计费；除非用户明确要求。
+6. “功能做完”不等于“可交付”：每个阶段按 [`docs/specs/reliability-invariants.md`](docs/specs/reliability-invariants.md) 检查失败边界、跨进程读写、stale 写入和首屏反馈；只测 happy path 不算验收。
 
 ## 当前状态
 
