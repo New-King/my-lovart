@@ -249,6 +249,14 @@ export function ChatPanel({
 
   const agentLabel = generation === "real" ? "seedream · h3" : generation === "mock" ? "mock-agent" : "agent";
 
+  // 评价条只挂在最新一条回答上：历史消息同时展开表单会互相干扰，滚动也会乱跳
+  const lastAssistantIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === "assistant") return i;
+    }
+    return -1;
+  }, [messages]);
+
   return (
     <section className="flex w-full shrink-0 flex-col bg-canvas lg:w-[380px] lg:border-l lg:border-line">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-3 lg:px-4">
@@ -484,15 +492,17 @@ export function ChatPanel({
                       <p className="text-[11px] text-faint">已停止生成，保留已产出的部分。</p>
                     )}
 
-                    {message.status !== "streaming" && message.status !== "queued" && (
-                      <MessageFeedback
-                        messageId={message.id}
-                        onExpand={() => {
-                          // 表单挂载后再滚，否则量到的 scrollHeight 还是旧值
-                          window.requestAnimationFrame(() => scrollToBottom(true));
-                        }}
-                      />
-                    )}
+                    {index === lastAssistantIndex &&
+                      message.status !== "streaming" &&
+                      message.status !== "queued" && (
+                        <MessageFeedback
+                          messageId={message.id}
+                          onExpand={() => {
+                            // 表单挂载后再滚，否则量到的 scrollHeight 还是旧值
+                            window.requestAnimationFrame(() => scrollToBottom(true));
+                          }}
+                        />
+                      )}
                   </div>
                 ),
               )}
