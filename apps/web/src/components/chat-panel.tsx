@@ -24,6 +24,7 @@ import { ChatEmptyState } from "./chat-empty-state";
 import { ClarificationCard } from "./clarification-card";
 import { ImageLightbox } from "./image-lightbox";
 import { MediaSkeleton } from "./media-skeleton";
+import { MessageFeedback } from "./message-feedback";
 import { RunProcess } from "./run-process";
 import { useToast } from "./ui/toast";
 
@@ -483,9 +484,9 @@ export function ChatPanel({
                       <p className="text-[11px] text-faint">已停止生成，保留已产出的部分。</p>
                     )}
 
-                    <div className="flex items-center gap-1">
-                      {message.content && <CopyButton text={message.content} />}
-                    </div>
+                    {message.status !== "streaming" && message.status !== "queued" && (
+                      <MessageFeedback messageId={message.id} />
+                    )}
                   </div>
                 ),
               )}
