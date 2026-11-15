@@ -48,11 +48,23 @@ async function attachToShot(
   projectId: string,
   shotId: string,
   assetId: string,
+  role: string,
+  storyboardId: string,
 ): Promise<void> {
-  if (!shotId) return;
   try {
     const repo = await getStoryboardsRepository();
-    await repo.applyAssetToShot(projectId, shotId, assetId);
+    if (role === "canon") {
+      if (storyboardId) await repo.setCanonAsset(projectId, storyboardId, assetId);
+      return;
+    }
+    if (!shotId) return;
+    if (role === "end_frame") {
+      await repo.applyEndFrame(projectId, shotId, assetId);
+    } else if (role === "video") {
+      await repo.applyVideo(projectId, shotId, assetId);
+    } else {
+      await repo.applyFirstFrame(projectId, shotId, assetId);
+    }
   } catch (err) {
     console.warn(
       "[worker] 资产挂分镜失败：",
@@ -104,6 +116,7 @@ async function runJobGeneration<T>(
 function assetFromArtifact(
   projectId: string,
   artifact: ImageBlock | VideoBlock,
+  role?: string,
 ): ProjectAsset {
   return {
     id: artifact.id,
@@ -128,7 +141,7 @@ function assetFromArtifact(
       : {}),
     sourceAssetIds: artifact.sourceAssetIds ?? [],
     ...(artifact.shotId ? { shotId: artifact.shotId } : {}),
-    metadata: { job: true },
+    metadata: { job: true, ...(role ? { role } : {}) },
     createdAt: new Date().toISOString(),
   };
 }
@@ -146,6 +159,8 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
   const prompt = asString(payload.prompt);
   const title = asString(payload.title) || prompt.slice(0, 30) || "生成图像";
   const shotId = asString(payload.shotId);
+  const storyboardId = asString(payload.storyboardId);
+  const role = asString(payload.role) || "free";
   if (!prompt) throw new Error("job payload 缺少 prompt");
 
   const inputImages = Array.isArray(payload.inputImages)
@@ -185,6 +200,8 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     prompt: prompt.slice(0, 2000),
     model: "Seedream 5.0 Lite",
     aspectRatio: asString(payload.aspectRatio) || "3:4",
+    role:
+      role === "canon" || role === "keyframe" || role === "end_frame" ? role : "free",
     sourceAssetIds,
     ...(shotId ? { shotId } : {}),
   };
@@ -211,12 +228,14 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
   }
 
   await getAssetsRepository()
-    .then((repo) => repo.save(job.projectId, assetFromArtifact(job.projectId, artifact)))
+    .then((repo) => repo.save(job.projectId, assetFromArtifact(job.projectId, artifact, role)))
     .catch((err) => {
       console.warn("[worker] 资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
-  if (shotId) await attachToShot(job.projectId, shotId, artifact.id);
+  if (shotId || (role === "canon" && storyboardId)) {
+    await attachToShot(job.projectId, shotId, artifact.id, role, storyboardId);
+  }
 
   return { artifact, jobId: job.id, ...(placed ? { elementId: placed.elementId, placement: placed.placement } : {}) };
 }
@@ -297,12 +316,12 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
   }
 
   await getAssetsRepository()
-    .then((repo) => repo.save(job.projectId, assetFromArtifact(job.projectId, artifact)))
+    .then((repo) => repo.save(job.projectId, assetFromArtifact(job.projectId, artifact, "video")))
     .catch((err) => {
       console.warn("[worker] 视频资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
-  if (shotId) await attachToShot(job.projectId, shotId, artifact.id);
+  if (shotId) await attachToShot(job.projectId, shotId, artifact.id, "video", "");
 
   return {
     artifact,

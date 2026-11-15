@@ -601,7 +601,10 @@ function assetFromArtifact(
     sourceAssetIds: artifact.sourceAssetIds ?? [],
     ...(artifact.shotId ? { shotId: artifact.shotId } : {}),
     messageId,
-    metadata: artifact.batchId ? { batchId: artifact.batchId } : {},
+    metadata: {
+      ...(artifact.batchId ? { batchId: artifact.batchId } : {}),
+      ...(artifact.type === "image" && artifact.role ? { role: artifact.role } : {}),
+    },
     createdAt: at,
   };
 }

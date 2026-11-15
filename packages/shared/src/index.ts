@@ -56,6 +56,9 @@ export type ToolBlock = {
   stage?: string;
 };
 
+/** 图片在视频前期里的角色；canon 是产品/角色设定图，后续关键帧都必须引用它 */
+export type AssetRole = "free" | "canon" | "keyframe" | "end_frame";
+
 export type ImageBlock = {
   type: "image";
   id: string;
@@ -70,6 +73,8 @@ export type ImageBlock = {
   aspectRatio?: string;
   /** 图生图/参考图来源的稳定 id，不是画布 elementId */
   sourceAssetIds?: string[];
+  /** 这张图是设定图、首帧还是尾帧；账本据此分流镜头指针 */
+  role?: AssetRole;
   /** 生成时挂到哪个分镜镜头；worker/账本用于自动成为镜头当前版本 */
   shotId?: string;
   /** 服务端已落画布时的元素 id；前端据此只刷新，不重复插入 */

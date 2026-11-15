@@ -33,7 +33,18 @@ const imageSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe("要挂到的分镜镜头 id；生成成功后自动成为该镜头当前版本"),
+    .describe("要挂到的分镜镜头 id；生成成功后自动成为该镜头首帧（role=keyframe）或尾帧（role=end_frame）"),
+  storyboardId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("role=canon 时必填，把设定图挂到这个分镜"),
+  role: z
+    .enum(["free", "canon", "keyframe", "end_frame"])
+    .optional()
+    .describe(
+      "图片角色。canon=产品/角色设定图，视频的第一步；keyframe=镜头首帧，必须基于 canon；end_frame=镜头尾帧；free=普通图片",
+    ),
 });
 
 const videoSchema = z.object({
@@ -160,8 +171,24 @@ const shotInputSchema = z.object({
 const createStoryboardSchema = z.object({
   title: z.string().min(1).max(80),
   brief: z.string().min(1).max(1000).describe("分镜目标/用途"),
+  kind: z
+    .enum(["image", "video"])
+    .optional()
+    .default("image")
+    .describe("video=要出片的视频时间线；image=纯视觉分镜/概念图，不含成片时长"),
   aspectRatio: z.enum(ASPECTS).optional(),
   style: z.string().max(200).optional(),
+  canonAssetId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("已确认的产品/角色设定图 asset_id；视频分镜必须先有 canon"),
+  totalDurationSeconds: z
+    .number()
+    .min(4)
+    .max(15)
+    .optional()
+    .describe("视频成片总时长；kind=video 必填。5 秒=1 个镜头，10 秒最多 2 个镜头"),
   shots: z.array(shotInputSchema).min(1).max(12),
 });
 
@@ -169,8 +196,11 @@ const updateStoryboardSchema = z.object({
   storyboardId: storyboardIdSchema,
   title: z.string().min(1).max(80).optional(),
   brief: z.string().max(1000).optional(),
+  kind: z.enum(["image", "video"]).optional(),
   aspectRatio: z.enum(ASPECTS).optional(),
   style: z.string().max(200).optional(),
+  canonAssetId: z.string().min(1).nullable().optional().describe("设定图 asset_id；null 表示清空"),
+  totalDurationSeconds: z.number().min(4).max(15).optional(),
   status: z.enum(["draft", "ready", "generating", "completed"]).optional(),
   active: z.boolean().optional(),
 });
@@ -218,15 +248,204 @@ const setShotAssetSchema = z.object({
 async function attachArtifactToShot(
   projectId: string,
   shotId: string | undefined,
-  assetId: string,
+  artifact: ImageBlock,
+  role: ImageRole = "keyframe",
+  storyboardId?: string,
 ): Promise<void> {
-  if (!shotId) return;
   try {
+    // 先落资产再写指针：canon/first_frame 都有外键约束，不能先指针后资产
+    await (await getAssetsRepository()).save(projectId, {
+      id: artifact.id,
+      projectId,
+      kind: "image",
+      origin: "generated",
+      title: artifact.title?.trim() || artifact.prompt?.slice(0, 40) || "未命名图片",
+      prompt: artifact.prompt ?? "",
+      ...(artifact.model ? { model: artifact.model } : {}),
+      url: artifact.url,
+      mimeType: artifact.mimeType,
+      width: artifact.width,
+      height: artifact.height,
+      ...(artifact.aspectRatio ? { aspectRatio: artifact.aspectRatio } : {}),
+      sourceAssetIds: artifact.sourceAssetIds ?? [],
+      ...(shotId ? { shotId } : {}),
+      metadata: { role },
+      createdAt: new Date().toISOString(),
+    });
     const repo = await getStoryboardsRepository();
-    await repo.applyAssetToShot(projectId, shotId, assetId);
+    if (role === "canon") {
+      if (storyboardId) await repo.setCanonAsset(projectId, storyboardId, artifact.id);
+      return;
+    }
+    if (!shotId) return;
+    if (role === "end_frame") {
+      await repo.applyEndFrame(projectId, shotId, artifact.id);
+    } else {
+      await repo.applyFirstFrame(projectId, shotId, artifact.id);
+    }
   } catch (err) {
     console.warn(
       "[storyboards] 生成资产挂镜头失败：",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+type ImageRole = "free" | "canon" | "keyframe" | "end_frame";
+
+type ImageReferencePlan = {
+  role: ImageRole;
+  references: string[];
+  canonId?: string;
+  shotId?: string;
+  storyboardId?: string;
+  error?: Record<string, unknown>;
+};
+
+/**
+ * 图片生成的参考图计划：
+ * - canon：产品/角色设定图，可引用用户上传的产品图；
+ * - keyframe / end_frame：必须属于某个镜头，并自动把该分镜的 canon 放到参考图第一位；
+ * - free：普通图片，不参与视频前期。
+ */
+export async function planImageReferences(
+  context: ToolContext,
+  input: {
+    role?: ImageRole;
+    shotId?: string;
+    storyboardId?: string;
+    inputImages?: string[];
+  },
+): Promise<ImageReferencePlan> {
+  const role: ImageRole = input.role ?? (input.shotId ? "keyframe" : "free");
+  const explicit = await resolveReferences(
+    input.inputImages,
+    context.attachmentMap,
+    context.projectAssets,
+  );
+
+  if (role === "free") {
+    return { role, references: explicit };
+  }
+
+  if (role === "canon") {
+    if (input.shotId) {
+      return {
+        role,
+        references: explicit,
+        error: {
+          error: "设定图不能挂到某个镜头；role=canon 只传 storyboardId 或不传",
+          code: "invalid_canon_target",
+        },
+      };
+    }
+    if (input.storyboardId) {
+      const repo = await getStoryboardsRepository();
+      const board = await repo.get(context.projectId, input.storyboardId);
+      if (!board) {
+        return {
+          role,
+          references: explicit,
+          error: { error: "找不到这个分镜，不能挂设定图", code: "invalid_storyboard" },
+        };
+      }
+    }
+    return {
+      role,
+      references: explicit.slice(0, 4),
+      ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
+    };
+  }
+
+  if (!input.shotId) {
+    return {
+      role,
+      references: explicit,
+      error: {
+        error: "首帧/尾帧必须传 shotId，先建分镜镜头再出关键帧",
+        code: "shot_required",
+      },
+    };
+  }
+
+  const repo = await getStoryboardsRepository();
+  const found = await repo.getShot(context.projectId, input.shotId);
+  if (!found) {
+    return {
+      role,
+      references: explicit,
+      error: { error: "找不到这个镜头", code: "invalid_shot" },
+    };
+  }
+  if (!found.storyboard.canonAssetId) {
+    return {
+      role,
+      references: explicit,
+      shotId: input.shotId,
+      error: {
+        error:
+          "这个分镜还没有产品/角色设定图，不能各自文生图。先生成 canon（有产品实拍图就用它做参考），确认后再出关键帧。",
+        code: "canon_required",
+        next: "generate_image(role=canon) → update_storyboard(canonAssetId) → generate_image(shotId, role=keyframe)",
+      },
+    };
+  }
+  const canon = await (await getAssetsRepository()).get(
+    context.projectId,
+    found.storyboard.canonAssetId,
+  );
+  if (!canon) {
+    return {
+      role,
+      references: explicit,
+      shotId: input.shotId,
+      error: {
+        error: "分镜的设定图资产已不存在，请重新生成或指定 canon",
+        code: "canon_missing",
+      },
+    };
+  }
+
+  const references = [canon.url, ...explicit.filter((url) => url !== canon.url)].slice(0, 4);
+  return {
+    role,
+    references,
+    canonId: canon.id,
+    shotId: input.shotId,
+    storyboardId: found.storyboard.id,
+  };
+}
+
+async function attachVideoToShot(
+  projectId: string,
+  shotId: string | undefined,
+  artifact: VideoBlock,
+): Promise<void> {
+  if (!shotId) return;
+  try {
+    await (await getAssetsRepository()).save(projectId, {
+      id: artifact.id,
+      projectId,
+      kind: "video",
+      origin: "generated",
+      title: artifact.title?.trim() || artifact.prompt?.slice(0, 40) || "未命名视频",
+      prompt: artifact.prompt ?? "",
+      ...(artifact.model ? { model: artifact.model } : {}),
+      url: artifact.url,
+      mimeType: artifact.mimeType,
+      width: artifact.width,
+      height: artifact.height,
+      ...(artifact.durationSeconds ? { durationSeconds: artifact.durationSeconds } : {}),
+      sourceAssetIds: artifact.sourceAssetIds ?? [],
+      shotId,
+      metadata: { role: "video" },
+      createdAt: new Date().toISOString(),
+    });
+    const repo = await getStoryboardsRepository();
+    await repo.applyVideo(projectId, shotId, artifact.id);
+  } catch (err) {
+    console.warn(
+      "[storyboards] 视频挂镜头失败：",
       err instanceof Error ? err.message : err,
     );
   }
@@ -261,18 +480,37 @@ export async function checkVideoPreflight(
       shot_id: found.shot.id,
     };
   }
+  if (!found.storyboard.canonAssetId) {
+    return {
+      error:
+        "这个视频分镜还没有产品/角色设定图（canon）。先把实拍图或设定图确认下来，所有镜头都必须基于它，否则每个镜头会各自长成不同产品。",
+      code: "canon_required",
+      shot_id: found.shot.id,
+      next: "generate_image(role=canon) → update_storyboard(canonAssetId) → generate_image(shotId, role=keyframe)",
+    };
+  }
+  const firstFrameId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
   let keyframe: ProjectAsset | null = null;
-  if (found.shot.activeAssetId) {
-    keyframe = await (await getAssetsRepository()).get(
-      context.projectId,
-      found.shot.activeAssetId,
-    );
+  if (firstFrameId) {
+    keyframe = await (await getAssetsRepository()).get(context.projectId, firstFrameId);
   }
   if (!keyframe || keyframe.kind !== "image") {
     return {
       error:
-        "这个镜头还没有首帧关键图。先用 generate_image 给该 shotId 生成一张关键画面，展示给用户确认，再生成视频。",
+        "这个镜头还没有首帧关键图。先用 generate_image(shotId, role=keyframe) 生成一张基于 canon 的关键画面，展示给用户确认，再生成视频。",
       code: "keyframe_required",
+      shot_id: found.shot.id,
+    };
+  }
+  const canonId = found.storyboard.canonAssetId ?? "";
+  if (
+    keyframe.metadata?.role !== "keyframe" ||
+    !keyframe.sourceAssetIds.includes(canonId)
+  ) {
+    return {
+      error:
+        "这张首帧不是基于 canon 生成的关键帧，产品可能对不上。必须用 generate_image(shotId, role=keyframe) 重新出，服务端会把 canon 作为参考图。",
+      code: "keyframe_not_anchored",
       shot_id: found.shot.id,
     };
   }
@@ -306,11 +544,19 @@ export function createAgentTools(context: ToolContext) {
   return [
     tool(
       async (input) => {
-        const referenceImages = await resolveReferences(
-          input.inputImages,
-          context.attachmentMap,
-          context.projectAssets,
-        );
+        const plan = await planImageReferences(context, {
+          role: input.role,
+          ...(input.shotId ? { shotId: input.shotId } : {}),
+          ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
+          ...(input.inputImages ? { inputImages: input.inputImages } : {}),
+        });
+        if (plan.error) return JSON.stringify(plan.error);
+        const referenceImages = plan.references;
+        const role = plan.role;
+        const sourceAssetIds = [
+          ...(plan.canonId ? [plan.canonId] : []),
+          ...(input.inputImages ?? []),
+        ];
 
         if (jobsEnabled()) {
           try {
@@ -324,8 +570,10 @@ export function createAgentTools(context: ToolContext) {
                 title: input.title,
                 aspectRatio: input.aspectRatio,
                 inputImages: referenceImages,
-                sourceAssetIds: input.inputImages ?? [],
+                sourceAssetIds,
+                role,
                 ...(input.shotId ? { shotId: input.shotId } : {}),
+                ...(plan.storyboardId ? { storyboardId: plan.storyboardId } : {}),
               },
             });
             const finished = await waitForJob(context.projectId, job.id, {
@@ -352,7 +600,9 @@ export function createAgentTools(context: ToolContext) {
                 await attachArtifactToShot(
                   context.projectId,
                   input.shotId,
-                  result.artifact.id,
+                  result.artifact,
+                  role,
+                  plan.storyboardId,
                 );
                 return JSON.stringify({
                   summary: `已生成图片「${result.artifact.title ?? input.title}」并放到画布。`,
@@ -415,14 +665,21 @@ export function createAgentTools(context: ToolContext) {
             prompt: input.prompt.slice(0, 2000),
             model: "Seedream 5.0 Lite",
             aspectRatio: input.aspectRatio,
-            sourceAssetIds: input.inputImages ?? [],
+            role,
+            sourceAssetIds,
             ...(input.shotId ? { shotId: input.shotId } : {}),
           };
 
-          await attachArtifactToShot(context.projectId, input.shotId, artifact.id);
+          await attachArtifactToShot(
+            context.projectId,
+            input.shotId,
+            artifact,
+            role,
+            plan.storyboardId,
+          );
 
           return JSON.stringify({
-            summary: `已生成图片「${input.title}」，${result.width}×${result.height}。`,
+            summary: `已生成${role === "canon" ? "设定图" : role === "keyframe" ? "关键帧" : role === "end_frame" ? "尾帧" : "图片"}「${input.title}」，${result.width}×${result.height}。`,
             artifact,
           });
         } catch (error) {
@@ -433,7 +690,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_image",
         description:
-          "生成一张图片。用户要画图、改图、出海报/插画/封面时调用。一次调用只生成一张；需要多个版本时调用多次。",
+          "生成一张图片。视频前期：role=canon 先做产品/角色设定图；role=keyframe/end_frame 用于镜头关键帧，必须基于已确认的 canon，服务端会自动把 canon 作为参考图。普通画图不传 role。",
         schema: imageSchema,
       },
     ),
@@ -446,13 +703,51 @@ export function createAgentTools(context: ToolContext) {
         );
         if (preflight) return JSON.stringify(preflight);
 
-        const referenceImages = (
+        let referenceImages = (
           await resolveReferences(
             input.inputImages,
             context.attachmentMap,
             context.projectAssets,
           )
         ).slice(0, 2);
+        let durationSeconds = input.durationSeconds ?? 8;
+        const sourceAssetIds = [...(input.inputImages ?? [])];
+
+        if (input.shotId) {
+          // 有镜头时，首帧/尾帧由服务端锁定，不允许模型临时换图
+          const found = await (await getStoryboardsRepository()).getShot(
+            context.projectId,
+            input.shotId,
+          );
+          if (found) {
+            if (found.shot.durationSeconds) {
+              durationSeconds = Math.round(found.shot.durationSeconds);
+            }
+            const frames: string[] = [];
+            const firstId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
+            if (firstId) {
+              const first = await (await getAssetsRepository()).get(
+                context.projectId,
+                firstId,
+              );
+              if (first?.kind === "image") {
+                frames.push(first.url);
+                sourceAssetIds.unshift(first.id);
+              }
+            }
+            if (found.shot.endFrameAssetId) {
+              const end = await (await getAssetsRepository()).get(
+                context.projectId,
+                found.shot.endFrameAssetId,
+              );
+              if (end?.kind === "image") {
+                frames.push(end.url);
+                sourceAssetIds.push(end.id);
+              }
+            }
+            if (frames.length > 0) referenceImages = frames.slice(0, 2);
+          }
+        }
 
         if (jobsEnabled()) {
           try {
@@ -465,9 +760,9 @@ export function createAgentTools(context: ToolContext) {
                 prompt: input.prompt,
                 title: input.title,
                 aspectRatio: input.aspectRatio,
-                durationSeconds: input.durationSeconds ?? 8,
+                durationSeconds,
                 inputImages: referenceImages,
-                sourceAssetIds: input.inputImages ?? [],
+                sourceAssetIds,
                 ...(input.shotId ? { shotId: input.shotId } : {}),
               },
             });
@@ -492,10 +787,10 @@ export function createAgentTools(context: ToolContext) {
                 artifact?: VideoBlock;
               };
               if (result?.artifact) {
-                await attachArtifactToShot(
+                await attachVideoToShot(
                   context.projectId,
                   input.shotId,
-                  result.artifact.id,
+                  result.artifact,
                 );
                 return JSON.stringify({
                   summary: `已生成视频「${result.artifact.title ?? input.title}」。`,
@@ -537,7 +832,7 @@ export function createAgentTools(context: ToolContext) {
           const result = await generateVideoWithMetaso({
             prompt: input.prompt,
             aspectRatio: input.aspectRatio as AspectRatio,
-            durationSeconds: input.durationSeconds ?? 8,
+            durationSeconds,
             referenceImages,
             signal: context.signal,
             onProgress: (progress, stage) =>
@@ -560,11 +855,11 @@ export function createAgentTools(context: ToolContext) {
             title: input.title,
             prompt: input.prompt.slice(0, 2000),
             model: "MiniMax H3",
-            sourceAssetIds: input.inputImages ?? [],
+            sourceAssetIds,
             ...(input.shotId ? { shotId: input.shotId } : {}),
           };
 
-          await attachArtifactToShot(context.projectId, input.shotId, artifact.id);
+          await attachVideoToShot(context.projectId, input.shotId, artifact);
 
           return JSON.stringify({
             summary: `已生成视频「${input.title}」，${result.durationSeconds} 秒。`,
@@ -578,7 +873,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_video",
         description:
-          "生成一条短视频。必须先有已确认的镜头脚本和首帧关键图：第一次只写脚本 + 出关键图并停下来等用户确认，下一轮用户确认后再带 shotId 调用。只有用户明确说“直接出片/不用确认”才能传 direct=true 跳过。",
+          "生成一条视频。必须先有 canon 设定图、镜头脚本和该镜头的首帧关键图；服务端会自动把该镜头首帧作为首帧参考，时长取镜头的 durationSeconds。只有用户明确说“直接出片/不用确认”才能传 direct=true 跳过。",
         schema: videoSchema,
       },
     ),
@@ -741,8 +1036,15 @@ export function createAgentTools(context: ToolContext) {
               storyboard_id: detail.storyboard.id,
               title: detail.storyboard.title,
               brief: detail.storyboard.brief,
+              kind: detail.storyboard.kind,
               status: detail.storyboard.status,
               active: detail.storyboard.active,
+              ...(detail.storyboard.canonAssetId
+                ? { canon_asset_id: detail.storyboard.canonAssetId }
+                : {}),
+              ...(detail.storyboard.totalDurationSeconds
+                ? { total_duration_seconds: detail.storyboard.totalDurationSeconds }
+                : {}),
               ...(detail.storyboard.aspectRatio
                 ? { aspect_ratio: detail.storyboard.aspectRatio }
                 : {}),
@@ -759,12 +1061,22 @@ export function createAgentTools(context: ToolContext) {
               ...(shot.camera ? { camera: shot.camera } : {}),
               ...(shot.transition ? { transition: shot.transition } : {}),
               ...(shot.activeAssetId ? { active_asset_id: shot.activeAssetId } : {}),
-              versions: (byShot.get(shot.id) ?? []).slice(0, 6).map((asset) => ({
+              ...(shot.firstFrameAssetId
+                ? { first_frame_asset_id: shot.firstFrameAssetId }
+                : {}),
+              ...(shot.endFrameAssetId ? { end_frame_asset_id: shot.endFrameAssetId } : {}),
+              ...(shot.videoAssetId ? { video_asset_id: shot.videoAssetId } : {}),
+              versions: (byShot.get(shot.id) ?? []).slice(0, 8).map((asset) => ({
                 asset_id: asset.id,
                 kind: asset.kind,
+                role: asset.metadata?.role ?? null,
                 title: asset.title,
                 created_at: asset.createdAt,
-                active: asset.id === shot.activeAssetId,
+                active:
+                  asset.id === shot.activeAssetId ||
+                  asset.id === shot.firstFrameAssetId ||
+                  asset.id === shot.endFrameAssetId ||
+                  asset.id === shot.videoAssetId,
               })),
             })),
             revisions: revisions.map((revision) => ({
@@ -793,17 +1105,26 @@ export function createAgentTools(context: ToolContext) {
           const detail = await repo.create(context.projectId, {
             title: input.title,
             brief: input.brief,
+            kind: input.kind,
             ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
             ...(input.style ? { style: input.style } : {}),
+            ...(input.canonAssetId ? { canonAssetId: input.canonAssetId } : {}),
+            ...(input.totalDurationSeconds
+              ? { totalDurationSeconds: input.totalDurationSeconds }
+              : {}),
             shots: input.shots,
           });
           return JSON.stringify({
             storyboard_id: detail.storyboard.id,
             title: detail.storyboard.title,
+            kind: detail.storyboard.kind,
+            total_duration_seconds: detail.storyboard.totalDurationSeconds,
+            canon_asset_id: detail.storyboard.canonAssetId,
             shots: activeShots(detail).map((shot) => ({
               shot_id: shot.id,
               order: shot.orderIndex,
               title: shot.title,
+              duration_seconds: shot.durationSeconds,
             })),
           });
         } catch (err) {
@@ -815,21 +1136,28 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "create_storyboard",
         description:
-          "创建结构化分镜和镜头草稿。用户确认分镜方向后调用；一次 1-12 个镜头，每个镜头先写标题/描述/prompt 草稿，不直接批量生成。",
+          "创建结构化分镜草稿。视频分镜必须传 kind=video、totalDurationSeconds，并按“每段至少 4 秒”拆镜头：5 秒=1 个，10 秒最多 2 个。不要把 5 秒拆成 3-4 个镜头。",
         schema: createStoryboardSchema,
       },
     ),
     tool(
       async (input) => {
         try {
-          const { storyboardId, ...patch } = input;
+          const { storyboardId, canonAssetId, ...patch } = input;
           const repo = await getStoryboardsRepository();
           const detail = await repo.updateStoryboard(context.projectId, storyboardId, patch);
+          const storyboard =
+            canonAssetId !== undefined
+              ? await repo.setCanonAsset(context.projectId, storyboardId, canonAssetId)
+              : detail.storyboard;
           return JSON.stringify({
-            storyboard_id: detail.storyboard.id,
-            title: detail.storyboard.title,
-            status: detail.storyboard.status,
-            active: detail.storyboard.active,
+            storyboard_id: storyboard.id,
+            title: storyboard.title,
+            kind: storyboard.kind,
+            status: storyboard.status,
+            active: storyboard.active,
+            canon_asset_id: storyboard.canonAssetId ?? null,
+            total_duration_seconds: storyboard.totalDurationSeconds ?? null,
           });
         } catch (err) {
           return JSON.stringify({
@@ -839,7 +1167,8 @@ export function createAgentTools(context: ToolContext) {
       },
       {
         name: "update_storyboard",
-        description: "改分镜标题、brief、画幅、风格、状态或 active。只传要改的字段。",
+        description:
+          "改分镜标题、brief、kind、画幅、风格、canon 设定图、总时长、状态或 active。只传要改的字段；canonAssetId=null 清空设定图。",
         schema: updateStoryboardSchema,
       },
     ),

@@ -74,8 +74,15 @@ export type StoryboardsRepository = {
     shotId: string,
     assetId: string | null,
   ): Promise<StoryboardShot>;
+  setCanonAsset(
+    projectId: string,
+    storyboardId: string,
+    assetId: string | null,
+  ): Promise<Storyboard>;
   /** 生成作业完成后由 worker 调用；幂等 */
-  applyAssetToShot(projectId: string, shotId: string, assetId: string): Promise<void>;
+  applyFirstFrame(projectId: string, shotId: string, assetId: string): Promise<void>;
+  applyEndFrame(projectId: string, shotId: string, assetId: string): Promise<void>;
+  applyVideo(projectId: string, shotId: string, assetId: string): Promise<void>;
   listRevisions(
     projectId: string,
     storyboardId: string,
@@ -88,8 +95,11 @@ type BoardRow = {
   project_id: string;
   title: string;
   brief: string;
+  kind: Storyboard["kind"];
   aspect_ratio: string | null;
   style: string | null;
+  canon_asset_id: string | null;
+  total_duration_seconds: number | null;
   status: StoryboardStatus;
   active: boolean;
   metadata: unknown;
@@ -108,6 +118,9 @@ type ShotRow = {
   camera: string | null;
   transition: string | null;
   active_asset_id: string | null;
+  first_frame_asset_id: string | null;
+  end_frame_asset_id: string | null;
+  video_asset_id: string | null;
   status: StoryboardShot["status"];
   metadata: unknown;
   deleted_at: string | null;
@@ -116,9 +129,9 @@ type ShotRow = {
 };
 
 const BOARD_COLUMNS =
-  "id, project_id, title, brief, aspect_ratio, style, status, active, metadata, created_at, updated_at";
+  "id, project_id, title, brief, kind, aspect_ratio, style, canon_asset_id, total_duration_seconds, status, active, metadata, created_at, updated_at";
 const SHOT_COLUMNS =
-  "id, storyboard_id, order_index, title, description, prompt, duration_seconds, camera, transition, active_asset_id, status, metadata, deleted_at, created_at, updated_at";
+  "id, storyboard_id, order_index, title, description, prompt, duration_seconds, camera, transition, active_asset_id, first_frame_asset_id, end_frame_asset_id, video_asset_id, status, metadata, deleted_at, created_at, updated_at";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -132,8 +145,13 @@ function toBoard(row: BoardRow): Storyboard {
     projectId: row.project_id,
     title: row.title,
     brief: row.brief ?? "",
+    kind: row.kind ?? "image",
     ...(row.aspect_ratio ? { aspectRatio: row.aspect_ratio } : {}),
     ...(row.style ? { style: row.style } : {}),
+    ...(row.canon_asset_id ? { canonAssetId: row.canon_asset_id } : {}),
+    ...(row.total_duration_seconds
+      ? { totalDurationSeconds: Number(row.total_duration_seconds) }
+      : {}),
     status: row.status,
     active: row.active,
     metadata: asRecord(row.metadata),
@@ -150,16 +168,52 @@ function toShot(row: ShotRow): StoryboardShot {
     title: row.title,
     description: row.description ?? "",
     prompt: row.prompt ?? "",
-    ...(row.duration_seconds ? { durationSeconds: row.duration_seconds } : {}),
+    ...(row.duration_seconds ? { durationSeconds: Number(row.duration_seconds) } : {}),
     ...(row.camera ? { camera: row.camera } : {}),
     ...(row.transition ? { transition: row.transition } : {}),
     ...(row.active_asset_id ? { activeAssetId: row.active_asset_id } : {}),
+    ...(row.first_frame_asset_id ? { firstFrameAssetId: row.first_frame_asset_id } : {}),
+    ...(row.end_frame_asset_id ? { endFrameAssetId: row.end_frame_asset_id } : {}),
+    ...(row.video_asset_id ? { videoAssetId: row.video_asset_id } : {}),
     status: row.status,
     metadata: asRecord(row.metadata),
     ...(row.deleted_at ? { deletedAt: row.deleted_at } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+type TimelineShot = { title: string; durationSeconds?: number };
+
+function assertVideoTimeline(
+  kind: "image" | "video" | undefined,
+  total: number | undefined,
+  shots: TimelineShot[],
+): void {
+  if (kind !== "video") return;
+  if (!total || total < 4 || total > 15) {
+    throw new StoryboardValidationError("视频分镜必须给 totalDurationSeconds，4-15 秒");
+  }
+  const maxShots = Math.floor(total / 4);
+  if (shots.length > maxShots) {
+    throw new StoryboardValidationError(
+      `总时长 ${total} 秒最多 ${maxShots} 个镜头（每段至少 4 秒）。${total} 秒不是短视频，不要拆成 ${shots.length} 段`,
+    );
+  }
+  for (const shot of shots) {
+    const duration = shot.durationSeconds;
+    if (!duration || duration < 4 || duration > 15) {
+      throw new StoryboardValidationError(
+        `镜头「${shot.title}」必须给 4-15 秒时长（视频 provider 单段最短 4 秒）`,
+      );
+    }
+  }
+  const sum = shots.reduce((acc, shot) => acc + (shot.durationSeconds ?? 0), 0);
+  if (Math.abs(sum - total) > 0.01) {
+    throw new StoryboardValidationError(
+      `镜头时长合计 ${sum} 秒，和总时长 ${total} 秒不一致；必须正好覆盖整条片子`,
+    );
+  }
 }
 
 function assertShots(input: CreateStoryboardInput): void {
@@ -169,14 +223,20 @@ function assertShots(input: CreateStoryboardInput): void {
   for (const shot of input.shots) {
     if (!shot.title.trim()) throw new StoryboardValidationError("镜头标题不能为空");
   }
+  assertVideoTimeline(input.kind, input.totalDurationSeconds, input.shots);
 }
 
 function boardPatch(patch: UpdateStoryboardInput): Record<string, unknown> {
   const value: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.title !== undefined) value.title = patch.title;
   if (patch.brief !== undefined) value.brief = patch.brief;
+  if (patch.kind !== undefined) value.kind = patch.kind;
   if (patch.aspectRatio !== undefined) value.aspect_ratio = patch.aspectRatio;
   if (patch.style !== undefined) value.style = patch.style;
+  if (patch.canonAssetId !== undefined) value.canon_asset_id = patch.canonAssetId;
+  if (patch.totalDurationSeconds !== undefined) {
+    value.total_duration_seconds = patch.totalDurationSeconds;
+  }
   if (patch.status !== undefined) value.status = patch.status;
   if (patch.active !== undefined) value.active = patch.active;
   return value;
@@ -331,8 +391,11 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
           project_id: projectId,
           title: input.title.trim(),
           brief: input.brief.trim(),
+          kind: input.kind ?? "image",
           aspect_ratio: input.aspectRatio ?? null,
           style: input.style ?? null,
+          canon_asset_id: input.canonAssetId ?? null,
+          total_duration_seconds: input.totalDurationSeconds ?? null,
           status: "draft",
           active: true,
         })
@@ -364,6 +427,14 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
 
     async updateStoryboard(projectId, storyboardId, patch) {
       const detail = await requireBoard(projectId, storyboardId);
+      const nextKind = patch.kind ?? detail.storyboard.kind;
+      if (nextKind === "video") {
+        assertVideoTimeline(
+          nextKind,
+          patch.totalDurationSeconds ?? detail.storyboard.totalDurationSeconds,
+          activeShots(detail),
+        );
+      }
       if (patch.active === true) {
         const { error: deactivateError } = await db()
           .from("storyboards")
@@ -383,7 +454,14 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
     },
 
     async updateShot(projectId, shotId, patch) {
-      const { shot } = await requireShot(projectId, shotId);
+      const { storyboard, shot } = await requireShot(projectId, shotId);
+      if (
+        storyboard.kind === "video" &&
+        patch.durationSeconds !== undefined &&
+        (patch.durationSeconds < 4 || patch.durationSeconds > 15)
+      ) {
+        throw new StoryboardValidationError("视频镜头每段必须是 4-15 秒");
+      }
       const { data, error } = await db()
         .from("storyboard_shots")
         .update(shotPatch(patch))
@@ -434,7 +512,14 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
       const now = new Date().toISOString();
       const { error } = await db()
         .from("storyboard_shots")
-        .update({ deleted_at: now, active_asset_id: null, updated_at: now })
+        .update({
+          deleted_at: now,
+          active_asset_id: null,
+          first_frame_asset_id: null,
+          end_frame_asset_id: null,
+          video_asset_id: null,
+          updated_at: now,
+        })
         .eq("id", shotId);
       if (error) throw error;
     },
@@ -445,6 +530,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
         .from("storyboard_shots")
         .update({
           active_asset_id: null,
+          first_frame_asset_id: null,
+          end_frame_asset_id: null,
+          video_asset_id: null,
           status: "draft",
           updated_at: new Date().toISOString(),
         })
@@ -461,7 +549,14 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
       const now = new Date().toISOString();
       const { error: shotError } = await db()
         .from("storyboard_shots")
-        .update({ active_asset_id: null, status: "draft", updated_at: now })
+        .update({
+          active_asset_id: null,
+          first_frame_asset_id: null,
+          end_frame_asset_id: null,
+          video_asset_id: null,
+          status: "draft",
+          updated_at: now,
+        })
         .eq("storyboard_id", storyboardId)
         .is("deleted_at", null);
       if (shotError) throw shotError;
@@ -495,8 +590,11 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
         .update({
           title: snapshot.storyboard.title,
           brief: snapshot.storyboard.brief,
+          kind: snapshot.storyboard.kind ?? "image",
           aspect_ratio: snapshot.storyboard.aspectRatio ?? null,
           style: snapshot.storyboard.style ?? null,
+          canon_asset_id: snapshot.storyboard.canonAssetId ?? null,
+          total_duration_seconds: snapshot.storyboard.totalDurationSeconds ?? null,
           status: snapshot.storyboard.status,
           active: snapshot.storyboard.active,
           metadata: snapshot.storyboard.metadata ?? {},
@@ -529,6 +627,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
             camera: shot.camera ?? null,
             transition: shot.transition ?? null,
             active_asset_id: shot.activeAssetId ?? null,
+            first_frame_asset_id: shot.firstFrameAssetId ?? null,
+            end_frame_asset_id: shot.endFrameAssetId ?? null,
+            video_asset_id: shot.videoAssetId ?? null,
             status: shot.status,
             metadata: shot.metadata ?? {},
             deleted_at: shot.deletedAt ?? null,
@@ -551,20 +652,38 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
 
     async setShotAsset(projectId, shotId, assetId) {
       await requireShot(projectId, shotId);
+      let pointer: "first" | "end" | "video" = "first";
       if (assetId) {
         const asset = await (await getAssetsRepository()).get(projectId, assetId);
         if (!asset) throw new StoryboardValidationError("资产不属于这个项目");
         if (asset.shotId && asset.shotId !== shotId) {
           throw new StoryboardValidationError("这个资产属于另一个镜头");
         }
+        pointer =
+          asset.kind === "video"
+            ? "video"
+            : asset.metadata?.role === "end_frame"
+              ? "end"
+              : "first";
+      }
+      const now = new Date().toISOString();
+      const value: Record<string, unknown> = {
+        active_asset_id: assetId,
+        status: assetId ? "ready" : "draft",
+        updated_at: now,
+      };
+      if (pointer === "first") {
+        value.first_frame_asset_id = assetId;
+        value.end_frame_asset_id = null;
+        value.video_asset_id = null;
+      } else if (pointer === "end") {
+        value.end_frame_asset_id = assetId;
+      } else {
+        value.video_asset_id = assetId;
       }
       const { data, error } = await db()
         .from("storyboard_shots")
-        .update({
-          active_asset_id: assetId,
-          status: assetId ? "ready" : "draft",
-          updated_at: new Date().toISOString(),
-        })
+        .update(value)
         .eq("id", shotId)
         .select(SHOT_COLUMNS)
         .single();
@@ -572,12 +691,58 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
       return toShot(data as ShotRow);
     },
 
-    async applyAssetToShot(projectId, shotId, assetId) {
+    async setCanonAsset(projectId, storyboardId, assetId) {
+      await requireBoard(projectId, storyboardId);
+      if (assetId) {
+        const asset = await (await getAssetsRepository()).get(projectId, assetId);
+        if (!asset || asset.kind !== "image") {
+          throw new StoryboardValidationError("设定图必须是这个项目里的图片资产");
+        }
+      }
+      const { data, error } = await db()
+        .from("storyboards")
+        .update({ canon_asset_id: assetId, updated_at: new Date().toISOString() })
+        .eq("id", storyboardId)
+        .eq("project_id", projectId)
+        .select(BOARD_COLUMNS)
+        .single();
+      if (error) throw error;
+      return toBoard(data as BoardRow);
+    },
+
+    async applyFirstFrame(projectId, shotId, assetId) {
       await requireShot(projectId, shotId);
       const { error } = await db()
         .from("storyboard_shots")
         .update({
           active_asset_id: assetId,
+          first_frame_asset_id: assetId,
+          status: "ready",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", shotId);
+      if (error) throw error;
+    },
+
+    async applyEndFrame(projectId, shotId, assetId) {
+      await requireShot(projectId, shotId);
+      const { error } = await db()
+        .from("storyboard_shots")
+        .update({
+          end_frame_asset_id: assetId,
+          status: "ready",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", shotId);
+      if (error) throw error;
+    },
+
+    async applyVideo(projectId, shotId, assetId) {
+      await requireShot(projectId, shotId);
+      const { error } = await db()
+        .from("storyboard_shots")
+        .update({
+          video_asset_id: assetId,
           status: "ready",
           updated_at: new Date().toISOString(),
         })
@@ -667,8 +832,13 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
         projectId,
         title: input.title.trim(),
         brief: input.brief.trim(),
+        kind: input.kind ?? "image",
         ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
         ...(input.style ? { style: input.style } : {}),
+        ...(input.canonAssetId ? { canonAssetId: input.canonAssetId } : {}),
+        ...(input.totalDurationSeconds
+          ? { totalDurationSeconds: input.totalDurationSeconds }
+          : {}),
         status: "draft",
         active: true,
         metadata: {},
@@ -745,6 +915,9 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
         ...found.shot,
         deletedAt: new Date().toISOString(),
         activeAssetId: undefined,
+        firstFrameAssetId: undefined,
+        endFrameAssetId: undefined,
+        videoAssetId: undefined,
         updatedAt: new Date().toISOString(),
       };
       found.board.detail.shots = found.board.detail.shots.map((shot) =>
@@ -755,7 +928,13 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       return this.updateShot(projectId, shotId, { status: "draft" }).then((shot) => {
         const found = findShot(projectId, shotId);
         if (found) {
-          found.shot = { ...found.shot, activeAssetId: undefined };
+          found.shot = {
+            ...found.shot,
+            activeAssetId: undefined,
+            firstFrameAssetId: undefined,
+            endFrameAssetId: undefined,
+            videoAssetId: undefined,
+          };
           found.board.detail.shots = found.board.detail.shots.map((item) =>
             item.id === shotId ? found.shot : item,
           );
@@ -774,6 +953,9 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       board.detail.shots = board.detail.shots.map((shot) => ({
         ...shot,
         activeAssetId: undefined,
+        firstFrameAssetId: undefined,
+        endFrameAssetId: undefined,
+        videoAssetId: undefined,
         status: "draft",
       }));
       return board.detail;
@@ -791,16 +973,35 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       return board.detail;
     },
     async setShotAsset(projectId, shotId, assetId) {
+      let pointer: "first" | "end" | "video" = "first";
       if (assetId) {
         const asset = await (await getAssetsRepository()).get(projectId, assetId);
         if (!asset) throw new StoryboardValidationError("资产不属于这个项目");
+        pointer =
+          asset.kind === "video"
+            ? "video"
+            : asset.metadata?.role === "end_frame"
+              ? "end"
+              : "first";
       }
       return this.updateShot(projectId, shotId, {
         status: assetId ? "ready" : "draft",
       }).then((shot) => {
         const found = findShot(projectId, shotId);
         if (found) {
-          found.shot = { ...found.shot, activeAssetId: assetId ?? undefined };
+          found.shot = {
+            ...found.shot,
+            activeAssetId: assetId ?? undefined,
+            ...(pointer === "first"
+              ? {
+                  firstFrameAssetId: assetId ?? undefined,
+                  endFrameAssetId: undefined,
+                  videoAssetId: undefined,
+                }
+              : {}),
+            ...(pointer === "end" ? { endFrameAssetId: assetId ?? undefined } : {}),
+            ...(pointer === "video" ? { videoAssetId: assetId ?? undefined } : {}),
+          };
           found.board.detail.shots = found.board.detail.shots.map((item) =>
             item.id === shotId ? found.shot : item,
           );
@@ -808,8 +1009,39 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
         return found?.shot ?? shot;
       });
     },
-    async applyAssetToShot(projectId, shotId, assetId) {
+    async setCanonAsset(projectId, storyboardId, assetId) {
+      const board = require(projectId, storyboardId);
+      if (assetId) {
+        const asset = await (await getAssetsRepository()).get(projectId, assetId);
+        if (!asset || asset.kind !== "image") {
+          throw new StoryboardValidationError("设定图必须是这个项目里的图片资产");
+        }
+      }
+      board.detail.storyboard = {
+        ...board.detail.storyboard,
+        canonAssetId: assetId ?? undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      return board.detail.storyboard;
+    },
+    async applyFirstFrame(projectId, shotId, assetId) {
       await this.setShotAsset(projectId, shotId, assetId);
+    },
+    async applyEndFrame(projectId, shotId, assetId) {
+      const found = findShot(projectId, shotId);
+      if (!found) throw new StoryboardNotFoundError("镜头不存在");
+      found.shot = { ...found.shot, endFrameAssetId: assetId, status: "ready" };
+      found.board.detail.shots = found.board.detail.shots.map((item) =>
+        item.id === shotId ? found.shot : item,
+      );
+    },
+    async applyVideo(projectId, shotId, assetId) {
+      const found = findShot(projectId, shotId);
+      if (!found) throw new StoryboardNotFoundError("镜头不存在");
+      found.shot = { ...found.shot, videoAssetId: assetId, status: "ready" };
+      found.board.detail.shots = found.board.detail.shots.map((item) =>
+        item.id === shotId ? found.shot : item,
+      );
     },
     async listRevisions(projectId, storyboardId, limit = 10) {
       const board = require(projectId, storyboardId);

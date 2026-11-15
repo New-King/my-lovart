@@ -47,8 +47,10 @@ export function buildProjectStateContext(
   for (const board of visibleBoards) {
     if (active && board.id === active.storyboard.id) continue;
     others.push(
-      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" status="${board.status}" shots="${board.shotCount}" active="${board.active}"${
+      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" status="${board.status}" shots="${board.shotCount}" active="${board.active}"${
         board.aspectRatio ? ` aspect="${escapeXml(board.aspectRatio)}"` : ""
+      }${board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""}${
+        board.canonAssetId ? ` canon_id="${escapeXml(board.canonAssetId)}"` : ""
       }/>`,
     );
   }
@@ -61,13 +63,21 @@ export function buildProjectStateContext(
     const shotLines = shots.map(
       (shot) =>
         `    <shot id="${escapeXml(shot.id)}" order="${shot.orderIndex}" title="${escapeXml(clip(shot.title, 60))}" status="${shot.status}"${
-          shot.activeAssetId ? ` asset_id="${escapeXml(shot.activeAssetId)}"` : ""
+          shot.firstFrameAssetId
+            ? ` first_frame_id="${escapeXml(shot.firstFrameAssetId)}"`
+            : shot.activeAssetId
+              ? ` asset_id="${escapeXml(shot.activeAssetId)}"`
+              : ""
+        }${shot.endFrameAssetId ? ` end_frame_id="${escapeXml(shot.endFrameAssetId)}"` : ""}${
+          shot.videoAssetId ? ` video_id="${escapeXml(shot.videoAssetId)}"` : ""
         }${shot.durationSeconds ? ` duration="${shot.durationSeconds}"` : ""}${
           shot.camera ? ` camera="${escapeXml(clip(shot.camera, 40))}"` : ""
         }>${escapeXml(clip(shot.description || shot.prompt))}</shot>`,
     );
     lines.push(
-      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" aspect="${escapeXml(board.aspectRatio ?? "")}" status="${board.status}" active="${board.active}" shots="${shots.length}">`,
+      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" aspect="${escapeXml(board.aspectRatio ?? "")}" status="${board.status}" active="${board.active}" shots="${shots.length}"${
+        board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""
+      }${board.canonAssetId ? ` canon_id="${escapeXml(board.canonAssetId)}"` : ""}>`,
       ...shotLines,
       "  </storyboard>",
     );
@@ -82,7 +92,7 @@ export function buildProjectStateContext(
   }
 
   const summary = active
-    ? `分镜「${active.storyboard.title}」${activeShots(active)} 个镜头`
+    ? `${active.storyboard.kind === "video" ? "视频分镜" : "分镜"}「${active.storyboard.title}」${activeShots(active)} 个镜头${active.storyboard.totalDurationSeconds ? ` / ${active.storyboard.totalDurationSeconds} 秒` : ""}`
     : `项目有 ${boards.length} 个分镜`;
 
   return {
