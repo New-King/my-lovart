@@ -94,11 +94,24 @@ const canvasActionSchema = z.object({
 });
 
 const choicesSchema = z.object({
-  options: z
-    .array(z.string().min(1).max(40))
+  questions: z
+    .array(
+      z.object({
+        question: z
+          .string()
+          .min(1)
+          .max(120)
+          .describe("一个需要用户确认的关键问题"),
+        options: z
+          .array(z.string().min(1).max(60))
+          .min(2)
+          .max(4)
+          .describe("2-4 个互斥的候选答案；不要写下一步动作"),
+      }),
+    )
     .min(1)
     .max(3)
-    .describe("1-3 个互斥的候选答案，必须是用户对上一个问题的回答，不是下一步动作或寒暄"),
+    .describe("1-3 个关键问题；用户逐个选择或自定义回答"),
 });
 
 const listAssetsSchema = z.object({
@@ -381,11 +394,22 @@ export function createAgentTools(context: ToolContext) {
       },
     ),
     tool(
-      async (input) => JSON.stringify({ summary: "等待用户选择", options: input.options }),
+      async (input) => {
+        const questions = input.questions.map((item, index) => ({
+          id: `q${index + 1}`,
+          question: item.question,
+          allowCustom: true,
+          options: item.options.map((label, optionIndex) => ({
+            id: `q${index + 1}o${optionIndex + 1}`,
+            label,
+          })),
+        }));
+        return JSON.stringify({ summary: "等待用户逐项回答", questions });
+      },
       {
         name: "offer_choices",
         description:
-          "在正文里问完一个关键问题后调用，把 1-3 个互斥的候选答案变成按钮。只在用户已给出大部分需求、只差一个关键项，且这个问题有清晰离散答案时使用。不要用它给下一步建议、确认收到、催用户上传或替代开放性问题；用户仍可直接输入其他答案。",
+          "当 1-3 个关键信息各自有 2-4 个清晰互斥的候选答案时调用，前端会渲染成逐题回答的提问卡：用户逐个选择或自定义输入，点提交后把全部回答发回。调用前正文只写一句不超过 40 字的承接，不要重复问题或选项，也不要用「以上/下面」指代题目；不要用它给下一步动作、确认收到或替代开放性问题。",
         schema: choicesSchema,
       },
     ),

@@ -33,6 +33,7 @@ import {
   markRunning,
   saveElements,
   setMessageOptions,
+  setMessageQuestions,
   setQueuePosition,
   startAssistantMessage,
   startThought,
@@ -502,6 +503,8 @@ function summarizeEvent(event: RunEvent): Record<string, unknown> {
       return { ...base, chars: event.delta.length };
     case "message.options":
       return { ...base, options: event.options };
+    case "message.questions":
+      return { ...base, questions: event.questions.map((question) => question.question) };
     case "tool.started":
       return { ...base, tool: event.tool.tool, title: event.tool.title };
     case "tool.failed":
@@ -585,6 +588,9 @@ function applyEvent(projectId: string, messageId: string, event: RunEvent): void
       return;
     case "message.options":
       setMessageOptions(projectId, messageId, event.options, event.at);
+      return;
+    case "message.questions":
+      setMessageQuestions(projectId, messageId, event.questions, event.at);
       return;
     case "tool.started":
       appendBlock(projectId, messageId, event.tool, event.at);

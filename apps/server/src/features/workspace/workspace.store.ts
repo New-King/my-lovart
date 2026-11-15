@@ -3,6 +3,7 @@ import type {
   ChatAttachment,
   ChatBlock,
   ChatMessage,
+  ChoiceQuestion,
   MessagePart,
   RunError,
   RunStep,
@@ -165,6 +166,18 @@ export function setMessageOptions(
   const message = findMessage(projectId, messageId);
   if (!message || options.length === 0) return;
   message.options = options.slice(0, 6);
+  touch(message, at);
+}
+
+export function setMessageQuestions(
+  projectId: string,
+  messageId: string,
+  questions: ChoiceQuestion[],
+  at: string,
+): void {
+  const message = findMessage(projectId, messageId);
+  if (!message || questions.length === 0) return;
+  message.questions = questions.slice(0, 3);
   touch(message, at);
 }
 

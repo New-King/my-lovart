@@ -2,6 +2,7 @@ import type {
   ChatAttachment,
   ChatBlock,
   ChatMessage,
+  ChoiceQuestion,
   MessagePart,
   RunError,
   RunStep,
@@ -33,6 +34,7 @@ type MessageRow = {
   steps: unknown;
   thoughts: unknown;
   options: unknown;
+  questions: unknown;
   status: string | null;
   error: string | null;
   failure: unknown;
@@ -41,7 +43,7 @@ type MessageRow = {
 };
 
 const MESSAGE_COLUMNS =
-  "id, role, content, blocks, parts, attachments, steps, thoughts, options, status, error, failure, created_at, updated_at";
+  "id, role, content, blocks, parts, attachments, steps, thoughts, options, questions, status, error, failure, created_at, updated_at";
 
 function asArray<T>(value: unknown): T[] | undefined {
   return Array.isArray(value) && value.length > 0 ? (value as T[]) : undefined;
@@ -70,6 +72,9 @@ function toMessage(row: MessageRow): ChatMessage | null {
     ...(asArray<RunStep>(row.steps) ? { steps: asArray<RunStep>(row.steps) } : {}),
     ...(asArray<Thought>(row.thoughts) ? { thoughts: asArray<Thought>(row.thoughts) } : {}),
     ...(asArray<string>(row.options) ? { options: asArray<string>(row.options) } : {}),
+    ...(asArray<ChoiceQuestion>(row.questions)
+      ? { questions: asArray<ChoiceQuestion>(row.questions) }
+      : {}),
   };
 }
 
@@ -209,6 +214,7 @@ function createSupabaseWorkspaceRepository(): WorkspaceRepository {
           steps: message.steps ?? [],
           thoughts: message.thoughts ?? [],
           options: message.options ?? [],
+          questions: message.questions ?? [],
           status: message.status ?? "completed",
           error: message.error ?? null,
           failure: message.failure ?? null,

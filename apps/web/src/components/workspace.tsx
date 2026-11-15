@@ -163,6 +163,8 @@ function applyRunEvent(prev: WorkspaceData | null, event: RunEvent): WorkspaceDa
       });
     case "message.options":
       return patch((message) => ({ ...message, updatedAt: at, options: event.options }));
+    case "message.questions":
+      return patch((message) => ({ ...message, updatedAt: at, questions: event.questions }));
     case "tool.started":
       return patch((message) => ({
         ...message,
@@ -744,9 +746,7 @@ export function Workspace() {
           sending={running}
           onCreate={handleCreate}
           onSend={handleSend}
-          onQuickReply={(text) => {
-            void handleSend(text);
-          }}
+          onQuickReply={(text) => handleSend(text)}
           onStop={handleStop}
           onRetry={handleRetry}
           onAddToCanvas={handleAddToCanvas}

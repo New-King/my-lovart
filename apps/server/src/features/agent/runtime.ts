@@ -2,6 +2,7 @@ import type {
   AspectRatio,
   CanvasCommand,
   ChatAttachment,
+  ChoiceQuestion,
   ImageBlock,
   RunError,
   RunEvent,
@@ -278,13 +279,18 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
         if (name === "offer_choices") {
           const parsed = parseToolOutput(event.data?.output);
-          const options = Array.isArray(parsed?.options)
-            ? parsed.options
-                .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-                .slice(0, 3)
+          const questions = Array.isArray(parsed?.questions)
+            ? (parsed.questions as ChoiceQuestion[]).filter(
+                (question) =>
+                  question &&
+                  typeof question.id === "string" &&
+                  typeof question.question === "string" &&
+                  Array.isArray(question.options) &&
+                  question.options.length >= 2,
+              )
             : [];
-          if (options.length > 0) {
-            yield emit({ type: "message.options", options });
+          if (questions.length > 0) {
+            yield emit({ type: "message.questions", questions });
           }
           continue;
         }
@@ -585,7 +591,7 @@ function readChunkText(chunk: unknown): string {
 }
 
 function parseToolOutput(output: unknown):
-  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown; jobId?: string; jobType?: string }
+  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown; jobId?: string; jobType?: string; questions?: unknown }
   | null {
   if (typeof output === "string") return safeJson(output);
   if (typeof output !== "object" || output === null) return null;

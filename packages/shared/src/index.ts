@@ -168,6 +168,19 @@ export type MessagePart =
   | { type: "text"; text: string }
   | { type: "block"; block: ChatBlock };
 
+export type ChoiceOption = {
+  id: string;
+  label: string;
+};
+
+export type ChoiceQuestion = {
+  id: string;
+  question: string;
+  options: ChoiceOption[];
+  /** 默认允许自定义回答；显式 false 时只显示候选 */
+  allowCustom?: boolean;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -191,6 +204,8 @@ export type ChatMessage = {
   parts?: MessagePart[];
   /** 助手这一轮给出的快捷选项，用户点一下就把选项原文发回去 */
   options?: string[];
+  /** 结构化追问：每个问题独立回答，可自定义；客户端按问题卡片渲染 */
+  questions?: ChoiceQuestion[];
 };
 
 export type AspectRatio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
@@ -237,6 +252,7 @@ export type RunEvent =
   | (RunEventBase & { type: "thinking.completed"; thoughtId: string })
   | (RunEventBase & { type: "message.delta"; delta: string })
   | (RunEventBase & { type: "message.options"; options: string[] })
+  | (RunEventBase & { type: "message.questions"; questions: ChoiceQuestion[] })
   | (RunEventBase & { type: "tool.started"; tool: ToolBlock })
   | (RunEventBase & {
       type: "tool.progress";

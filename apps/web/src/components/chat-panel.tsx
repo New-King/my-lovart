@@ -21,6 +21,7 @@ import { MessageAttachments } from "./chat-attachments";
 import { ChatBlocks } from "./chat-blocks";
 import { ChatComposer, type ChatComposerHandle } from "./chat-composer";
 import { ChatEmptyState } from "./chat-empty-state";
+import { ClarificationCard } from "./clarification-card";
 import { ImageLightbox } from "./image-lightbox";
 import { MediaSkeleton } from "./media-skeleton";
 import { RunProcess } from "./run-process";
@@ -38,8 +39,8 @@ type Props = {
     text: string,
     attachments: ChatAttachment[],
   ) => Promise<boolean>;
-  /** 点快捷选项：直接把选项原话发出去，不额外带画幅 */
-  onQuickReply: (text: string) => void;
+  /** 快捷回答：直接当成用户消息发出去 */
+  onQuickReply: (text: string) => Promise<boolean>;
   onStop: () => void;
   onRetry: () => void;
   onAddToCanvas: (block: ImageBlock) => void;
@@ -408,28 +409,40 @@ export function ChatPanel({
 
                     <ActiveMediaSkeleton message={message} />
 
-                    {message.options &&
+                    {message.questions &&
+                    message.questions.length > 0 &&
+                    index === messages.length - 1 &&
+                    message.status !== "streaming" &&
+                    message.status !== "queued" ? (
+                      <div className="pt-1">
+                        <ClarificationCard
+                          questions={message.questions}
+                          disabled={sending}
+                          onSubmit={onQuickReply}
+                        />
+                      </div>
+                    ) : message.options &&
                       message.options.length > 0 &&
                       index === messages.length - 1 &&
                       message.status !== "streaming" &&
-                      message.status !== "queued" && (
-                        <div className="flex flex-wrap gap-1.5 pt-0.5">
-                          {message.options.map((option) => (
-                            <button
-                              key={option}
-                              type="button"
-                              onClick={() => onQuickReply(option)}
-                              disabled={sending}
-                              className="max-w-full rounded-full border border-line bg-surface px-3 py-1.5 text-left text-[11.5px] leading-snug text-ink transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {option}
-                            </button>
-                          ))}
-                          <p className="basis-full pt-0.5 text-[10px] text-faint">
-                            也可以直接输入其他答案。
-                          </p>
-                        </div>
-                      )}
+                      message.status !== "queued" ? (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {message.options.map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => void onQuickReply(option)}
+                            disabled={sending}
+                            className="max-w-full rounded-full border border-line bg-surface px-3 py-1.5 text-left text-[11.5px] leading-snug text-ink transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                        <p className="basis-full pt-0.5 text-[10px] text-faint">
+                          也可以直接输入其他答案。
+                        </p>
+                      </div>
+                    ) : null}
 
                     {message.status === "failed" && (
                       <div className="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger/5 px-2.5 py-2 text-[11.5px] text-danger">
