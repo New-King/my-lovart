@@ -14,6 +14,7 @@
     "verify:video-guard": "pnpm build && node --env-file=../../.env.local ./scripts/verify-video-guard.mjs",
     "verify:video-frame": "pnpm build && node --env-file=../../.env.local ./scripts/verify-video-frame.mjs",
     "verify:generation-config": "pnpm build && node --env-file=../../.env.local ./scripts/verify-generation-config.mjs",
+    "run:video-conversation": "pnpm build && node --env-file=../../.env.local ./scripts/run-video-conversation.mjs",
     "trace:latest": "node ./scripts/trace-latest.mjs"
   },
   "dependencies": {

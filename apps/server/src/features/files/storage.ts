@@ -1,4 +1,5 @@
 import { getDb } from "../../db/supabase.js";
+import { env } from "../../lib/env.js";
 
 export const STORAGE_BUCKET = "project-files";
 
@@ -21,6 +22,8 @@ export async function uploadStoredFile(
   data: Buffer,
   mimeType: string,
 ): Promise<boolean> {
+  // memory 模式或只跑对话回放时没有 Supabase；文件留内存即可，不要每张图都报一次错
+  if (!env.supabaseUrl || !env.supabaseServiceKey) return false;
   try {
     await ensureStorageBucket();
     const { error } = await getDb()
@@ -40,6 +43,7 @@ export async function uploadStoredFile(
 export async function downloadStoredFile(
   path: string,
 ): Promise<{ data: Buffer; mimeType: string } | null> {
+  if (!env.supabaseUrl || !env.supabaseServiceKey) return null;
   try {
     const { data, error } = await getDb().storage.from(STORAGE_BUCKET).download(path);
     if (error || !data) {

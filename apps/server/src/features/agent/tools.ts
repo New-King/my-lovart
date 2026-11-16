@@ -384,6 +384,23 @@ function dedupe(values: string[]): string[] {
 }
 
 /**
+ * 判断脚本是否真的要求“开盖/螺纹/内胆”等状态。
+ * 不能只做关键词命中：客户常写“杯盖保持闭合，不要出现开盖、螺纹、内胆”，
+ * 这些否定词是在排除状态，不是在要求状态。按句子看：否定词出现在状态词之前就跳过。
+ */
+export function promptRequiresProductDetail(text: string): boolean {
+  const state = /开盖|打开|拧开|螺纹|内胆|杯口内部|盖内|倒水|出水/;
+  const negative = /不|禁止|无|没有|避免|不得|勿/;
+  for (const sentence of text.split(/[。；;\n]/)) {
+    const match = sentence.match(state);
+    if (!match || match.index === undefined) continue;
+    if (negative.test(sentence.slice(0, match.index))) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
  * 图片生成的参考图计划：
  * - canon：产品/角色/场景/主视觉锚图，可引用用户上传的产品图；
  * - keyframe：自动引用该分镜全部锚图，并承接上一镜头尾帧；
@@ -601,9 +618,7 @@ export async function planImageReferences(
     found.shot.prompt,
     input.prompt,
   ].join(" ");
-  const needsProductDetail = /开盖|打开|拧开|螺纹|内胆|杯口内部|盖内|倒水|出水/.test(
-    stateText,
-  );
+  const needsProductDetail = promptRequiresProductDetail(stateText);
   if (
     policy !== "loose" &&
     (role === "keyframe" || role === "end_frame") &&

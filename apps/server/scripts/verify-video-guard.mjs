@@ -256,6 +256,20 @@ try {
     openState.error?.code ?? "allowed",
   );
 
+  const negativeState = await planImageReferences(
+    baseContext(new Date().toISOString()),
+    {
+      role: "keyframe",
+      shotId: shot.id,
+      prompt: "晨光静置，杯盖全程闭合密封，不要出现开盖、螺纹、内胆、倒水、热气",
+    },
+  );
+  check(
+    "否定句里的“开盖/螺纹/内胆”不会被误判成状态要求",
+    !negativeState.error,
+    negativeState.error?.code ?? "allowed",
+  );
+
   const detailId = randomUUID();
   await (await getAssetsRepository()).save(projectId, {
     id: detailId,

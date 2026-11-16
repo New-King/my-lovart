@@ -41,6 +41,7 @@
 - [x] 画布 revision 乐观锁 + 跨进程刷新；生成图落画布后前端聚焦并提示
 - [ ] 画布工具深度（add_text/add_shape/add_line/update_text/update_style）
 - [ ] golden 场景自动化
+- [x] 视频前期 golden 对话回放脚本（真实模型，停在视频前，输出自包含 HTML；M30）
 - [ ] 可观测 trace
 
 ## Phase 0 · 行为契约与验收基线（当前）

@@ -44,7 +44,8 @@
 | G34 真实保温杯前期验证 | 部分通过 | 闭盖 v1 锚图/首尾帧同一产品；开盖 v2 杯身变宽、螺纹口被发明，身份不合格。顺带修复本地 `/files` URL 传给 provider 导致 400（`docs/notes/M26.md`） |
 | G35 开盖状态门槛 | 通过（24/24） | 无细节实拍 `detail_photo_required`；开盖关键帧缺细节锚 `product_state_reference_required`；重做首帧以当前首帧为主参考（`docs/notes/M27.md`） |
 | G36 生成渠道切换 | 通过（11/11 + 真图） | 默认 Seedream 4.5；`doubao-seedream-4-5-251128` 真实 2K 出图 2048×2048；展示名可解析；未知模型拒绝（`docs/notes/M28.md`） |
-| G37 一致性策略 | 通过（29/29） | strict 缺实拍拒绝；adaptive 允许生成设定图并 warning；loose 允许无 canon/首帧草稿、不强制末帧衔接（`docs/notes/M29.md`） |
+| G37 一致性策略 | 通过（30/30） | strict 缺实拍拒绝；adaptive 允许生成设定图并 warning；loose 允许无 canon/首帧草稿、不强制末帧衔接（`docs/notes/M29.md`） |
+| G38 保温杯 10 秒广告完整对话 | 通过（7/7，真实模型回放） | 从一句需求开始，3 轮后停在视频前：2 镜分镜、产品/主视觉锚图、第 1 镜首尾帧；0 次 `generate_video`（`docs/notes/M30.md`，HTML 在 `verification/video-conversation-2026-11-16/`） |
 
 ## 当前失败/缺口
 

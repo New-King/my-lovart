@@ -1193,11 +1193,18 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
 }
 
 let repository: Promise<StoryboardsRepository> | null = null;
+let memoryRepository: StoryboardsRepository | null = null;
 let warned = false;
+
+/** 内存模式必须单例：每次调用都 new 会让分镜、镜头 id 立刻失效。 */
+function memoryStoryboards(): StoryboardsRepository {
+  memoryRepository ??= createMemoryStoryboardsRepository();
+  return memoryRepository;
+}
 
 export function getStoryboardsRepository(): Promise<StoryboardsRepository> {
   if (env.projectsStore !== "supabase") {
-    return Promise.resolve(createMemoryStoryboardsRepository());
+    return Promise.resolve(memoryStoryboards());
   }
   if (repository) return repository;
   repository = (async () => {
@@ -1210,7 +1217,7 @@ export function getStoryboardsRepository(): Promise<StoryboardsRepository> {
             "[storyboards] 分镜未启用：请先执行 supabase/migrations/0009_storyboards.sql",
           );
         }
-        return createMemoryStoryboardsRepository();
+        return memoryStoryboards();
       }
       return createSupabaseStoryboardsRepository();
     } catch (err) {
@@ -1218,7 +1225,7 @@ export function getStoryboardsRepository(): Promise<StoryboardsRepository> {
         warned = true;
         console.warn("[storyboards] 分镜初始化失败，回落到内存：", err);
       }
-      return createMemoryStoryboardsRepository();
+      return memoryStoryboards();
     }
   })();
   return repository;

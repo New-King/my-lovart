@@ -98,7 +98,7 @@ migration `0010` / `0011` / `0012`（已执行）：
 
 ## 验收
 
-`apps/server/scripts/verify-video-guard.mjs`，29/29 通过，不调用图片/视频 provider；`verify-video-frame.mjs` 通过（生成 1 秒测试视频并抽末帧）：
+`apps/server/scripts/verify-video-guard.mjs`，30/30 通过，不调用图片/视频 provider；`verify-video-frame.mjs` 通过（生成 1 秒测试视频并抽末帧）：
 
 - strict 无产品实拍 → `canon_photo_required`；strict 无细节实拍 → `detail_photo_required`
 - adaptive 无产品实拍 → 允许生成设定图并返回 warning；adaptive 无细节实拍 → 允许生成细节锚草案
@@ -107,6 +107,7 @@ migration `0010` / `0011` / `0012`（已执行）：
 - 本轮新建镜头 → `video_plan_unconfirmed`
 - 本轮新锚图未确认 → `canon_unconfirmed`
 - 开盖/内部状态缺细节锚图 → `product_state_reference_required`
+- 否定句里的“开盖/螺纹/内胆”不触发状态要求
 - 缺 canon → 关键帧/出片均 `canon_required`
 - 关键帧自动以 canon 为第一参考图
 - 缺首帧 → `keyframe_required`

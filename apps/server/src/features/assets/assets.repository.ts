@@ -145,14 +145,21 @@ function createMemoryAssetsRepository(): AssetsRepository {
 }
 
 let repository: Promise<AssetsRepository> | null = null;
+let memoryRepository: AssetsRepository | null = null;
 let warned = false;
+
+/** 内存模式必须单例：每次调用都 new 会让资产账本、镜头指针全部丢失。 */
+function memoryAssets(): AssetsRepository {
+  memoryRepository ??= createMemoryAssetsRepository();
+  return memoryRepository;
+}
 
 /**
  * 优先 Supabase；迁移未执行或连接失败时回落到内存，保证会话不中断。
  * 老消息里的 blocks 还会由 collectLegacyAssets 兜底。
  */
 export function getAssetsRepository(): Promise<AssetsRepository> {
-  if (env.projectsStore !== "supabase") return Promise.resolve(createMemoryAssetsRepository());
+  if (env.projectsStore !== "supabase") return Promise.resolve(memoryAssets());
   if (repository) return repository;
 
   repository = (async () => {
@@ -165,7 +172,7 @@ export function getAssetsRepository(): Promise<AssetsRepository> {
             "[assets] 产物账本未启用：请先执行 supabase/migrations/0003_project_assets.sql",
           );
         }
-        return createMemoryAssetsRepository();
+        return memoryAssets();
       }
       return createSupabaseAssetsRepository();
     } catch (err) {
@@ -173,7 +180,7 @@ export function getAssetsRepository(): Promise<AssetsRepository> {
         warned = true;
         console.warn("[assets] 产物账本初始化失败，回落到内存：", err);
       }
-      return createMemoryAssetsRepository();
+      return memoryAssets();
     }
   })();
 
