@@ -545,7 +545,7 @@ export async function planImageReferences(
     }
     const continuity = await assets.get(context.projectId, continuityId);
     if (continuity?.kind === "image") {
-      continuityRefs.push(continuity.url);
+      continuityRefs.push((await fileDataUrlFromUrl(continuity.url)) ?? continuity.url);
       sourceAssetIds.push(continuity.id);
     }
   }
@@ -566,7 +566,7 @@ export async function planImageReferences(
     }
     const first = await assets.get(context.projectId, firstId);
     if (first?.kind === "image") {
-      continuityRefs.push(first.url);
+      continuityRefs.push((await fileDataUrlFromUrl(first.url)) ?? first.url);
       sourceAssetIds.push(first.id);
     }
   }
@@ -575,10 +575,12 @@ export async function planImageReferences(
     [board.canonAssetId, board.styleAnchorAssetId].filter((id): id is string => Boolean(id)),
   );
   const references = dedupe([
-    ...validAnchors
-      .filter((asset) => primaryAnchorIds.has(asset.id))
-      .slice(0, 2)
-      .map((asset) => asset.url),
+    ...(await Promise.all(
+      validAnchors
+        .filter((asset) => primaryAnchorIds.has(asset.id))
+        .slice(0, 2)
+        .map(async (asset) => (await fileDataUrlFromUrl(asset.url)) ?? asset.url),
+    )),
     ...continuityRefs,
     ...explicit,
   ]).slice(0, 3);
@@ -1002,7 +1004,7 @@ export function createAgentTools(context: ToolContext) {
                 firstId,
               );
               if (first?.kind === "image") {
-                frames.push(first.url);
+                frames.push((await fileDataUrlFromUrl(first.url)) ?? first.url);
                 sourceAssetIds.unshift(first.id);
               }
             }
@@ -1012,7 +1014,7 @@ export function createAgentTools(context: ToolContext) {
                 found.shot.endFrameAssetId,
               );
               if (end?.kind === "image") {
-                frames.push(end.url);
+                frames.push((await fileDataUrlFromUrl(end.url)) ?? end.url);
                 sourceAssetIds.push(end.id);
               }
             }
