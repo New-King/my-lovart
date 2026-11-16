@@ -4,6 +4,7 @@ import type {
   ChatAttachment,
   ChoiceQuestion,
   ImageBlock,
+  InspirationBlock,
   RunError,
   RunEvent,
   ToolName,
@@ -147,6 +148,17 @@ function toolStartMeta(
         title: "整理问题",
         detail: `${questions.length} 个问题`,
         ...(titles.length > 0 ? { inputSummary: titles.join("\n") } : {}),
+      };
+    }
+    case "search_inspiration": {
+      const directions = Array.isArray(args?.directions) ? args.directions : [];
+      const labels = directions
+        .map((item) => (asRecord(item)?.label as string | undefined) ?? "")
+        .filter(Boolean);
+      return {
+        title: "搜索灵感",
+        detail: `${directions.length} 组方向`,
+        inputSummary: labels.length > 0 ? labels.join("\n") : undefined,
       };
     }
     case "list_assets": {
@@ -593,6 +605,40 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
           continue;
         }
 
+        if (name === "search_inspiration") {
+          const parsed = parseToolOutput(event.data?.output);
+          if (parsed?.error) {
+            yield emit({
+              type: "tool.failed",
+              toolCallId,
+              error: {
+                code: typeof parsed.code === "string" ? parsed.code : "inspiration_search_failed",
+                message: parsed.error,
+                retriable: true,
+              },
+            });
+            continue;
+          }
+          const artifacts = Array.isArray(parsed?.artifacts) ? parsed.artifacts : [];
+          if (artifacts.length > 0) {
+            deliveredArtifact = true;
+            for (const artifact of artifacts) {
+              yield emit({
+                type: "artifact.ready",
+                artifact: { ...(artifact as object), batchId: toolCallId } as InspirationBlock,
+              });
+            }
+          }
+          yield emit({
+            type: "tool.completed",
+            toolCallId,
+            outputSummary:
+              toolResultSummary(name, parsed as Record<string, unknown> | null) ??
+              `${artifacts.length} 组灵感`,
+          });
+          continue;
+        }
+
         if (name !== "generate_image" && name !== "generate_video") {
           const parsed = parseToolOutput(event.data?.output);
           if (parsed?.error) {
@@ -892,7 +938,7 @@ function readChunkText(chunk: unknown): string {
 }
 
 function parseToolOutput(output: unknown):
-  | { summary?: string; artifact?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown; jobId?: string; jobType?: string; questions?: unknown }
+  | { summary?: string; artifact?: unknown; artifacts?: unknown; error?: string; code?: string; commands?: unknown; options?: unknown; jobId?: string; jobType?: string; questions?: unknown }
   | null {
   if (typeof output === "string") return safeJson(output);
   if (typeof output !== "object" || output === null) return null;

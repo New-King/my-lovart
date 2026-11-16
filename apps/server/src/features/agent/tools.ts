@@ -5,6 +5,7 @@ import type {
   AspectRatio,
   CanvasCommand,
   ImageBlock,
+  InspirationBlock,
   VideoBlock,
 } from "@my-lovart/shared";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import {
 import { generateImage, generateVideo } from "../generation/index.js";
 import { extractVideoLastFrame } from "../generation/video-frame.js";
 import { GenerationError, isAbortError } from "../generation/types.js";
+import { searchPexelsPhotos } from "../inspiration/pexels.js";
 import { createJob, cancelJob, jobsEnabled, waitForJob } from "../jobs/jobs.js";
 import { getAssetsRepository } from "../assets/assets.repository.js";
 import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
@@ -103,6 +105,52 @@ const videoSchema = z.object({
     .enum(["480p", "720p", "1080p"])
     .optional()
     .describe("可选输出分辨率，只有用户明确要求时才传"),
+});
+
+const searchInspirationSchema = z.object({
+  title: z
+    .string()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe("这组灵感搜索的短标题，例如「晨间通勤方向参考」"),
+  directions: z
+    .array(
+      z.object({
+        label: z
+          .string()
+          .min(1)
+          .max(30)
+          .describe("给用户看的方向名，必须用中文，例如「日系留白」「暗调产品」「街头抓拍」"),
+        query: z
+          .string()
+          .min(1)
+          .max(160)
+          .describe(
+            "Pexels 英文检索词：具体视觉物品 + 场景 + 光线/构图/风格。不要只写抽象情绪词，例如 morning sunlight commuter thermos minimal still life",
+          ),
+      }),
+    )
+    .min(1)
+    .max(3)
+    .describe("1-3 个视觉方向。用户没有明确方向时给 2-3 个；用户已有明确参考时只搜 1 个"),
+  orientation: z
+    .enum(["landscape", "portrait", "square"])
+    .optional()
+    .describe("参考图方向；视频 9:16 用 portrait，横屏用 landscape，方形用 square"),
+  color: z
+    .string()
+    .max(20)
+    .optional()
+    .describe("可选主色筛选（Pexels 支持的颜色名，如 warm、black、white、blue）"),
+  perPage: z
+    .number()
+    .int()
+    .min(2)
+    .max(6)
+    .optional()
+    .default(4)
+    .describe("每个方向返回几张，默认 4 张，最多 6 张"),
 });
 
 const canvasId = z
@@ -1332,6 +1380,65 @@ export function createAgentTools(context: ToolContext) {
         description:
           "生成一条视频。默认先有 canon 设定图、镜头脚本和该镜头首帧关键图；strict/adaptive 会强制这些前期，loose 允许直接按文字/参考生成。服务端会自动把该镜头首帧、尾帧作为参考，时长取镜头的 durationSeconds。只有用户明确说“直接出片/不用确认”才能传 direct=true 跳过。",
         schema: videoSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        const settled = await Promise.allSettled(
+          input.directions.map(async (direction) => ({
+            direction,
+            items: await searchPexelsPhotos({
+              query: direction.query,
+              perPage: input.perPage,
+              ...(input.orientation ? { orientation: input.orientation } : {}),
+              ...(input.color ? { color: input.color } : {}),
+              signal: context.signal,
+            }),
+          })),
+        );
+
+        const blocks: InspirationBlock[] = [];
+        const failures: string[] = [];
+        for (const result of settled) {
+          if (result.status === "rejected") {
+            const reason = result.reason;
+            failures.push(
+              reason instanceof GenerationError
+                ? `${reason.code}：${reason.message}`
+                : "灵感搜索失败",
+            );
+            continue;
+          }
+          const { direction, items } = result.value;
+          if (items.length === 0) continue;
+          blocks.push({
+            type: "inspiration",
+            id: randomUUID(),
+            query: `${direction.label}｜${direction.query}`,
+            items,
+          });
+        }
+
+        if (blocks.length === 0) {
+          return JSON.stringify({
+            error: failures[0] ?? "没有搜索到可用的灵感图，换一组具体视觉词再试",
+            code: "inspiration_empty",
+          });
+        }
+
+        const total = blocks.reduce((sum, block) => sum + block.items.length, 0);
+        return JSON.stringify({
+          summary: `找到 ${blocks.length} 组方向、${total} 张灵感图${failures.length ? `；${failures.length} 组失败` : ""}。请让用户看图选方向，选定后再生成。`,
+          artifacts: blocks,
+          directions: blocks.map((block) => block.query),
+          ...(failures.length ? { warnings: failures } : {}),
+        });
+      },
+      {
+        name: "search_inspiration",
+        description:
+          "搜索公开视觉灵感/参考图，用于用户还没有明确风格、构图、配色方向时，或用户主动说“找灵感/参考/竞品/看看别人怎么做”。返回 1-3 组方向、每组 4-6 张图；本轮只给用户看图选择，不要同轮自动生成产品设定图、分镜或视频。用户已有明确参考图/产品实拍时不要调用。",
+        schema: searchInspirationSchema,
       },
     ),
     tool(

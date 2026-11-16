@@ -43,6 +43,7 @@
 - [ ] golden 场景自动化
 - [x] 视频前期 golden 对话回放脚本（真实模型，停在视频前，输出自包含 HTML；M30）
 - [x] 普通用户版视频前期回放 + Lavart 视频流程审计（M31，8/8）
+- [x] 灵感搜索 `search_inspiration`（Pexels adapter + 方向卡片；M32，契约测试 9/9；真实 key 待配置）
 - [ ] 可观测 trace
 
 ## Phase 0 · 行为契约与验收基线（当前）

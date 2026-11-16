@@ -71,4 +71,8 @@ export const env = {
   openAiApiKey: required("OPENAI_API_KEY"),
   openAiApiBase: required("OPENAI_API_BASE", "https://api.openai.com/v1"),
   agentModel: required("LOOMIC_AGENT_MODEL", required("OPENAI_MODEL", "deepseek-chat")),
+
+  /** Pexels 灵感图搜索；没有 key 时 search_inspiration 会返回配置错误 */
+  pexelsApiKey: required("PEXELS_API_KEY"),
+  pexelsApiBase: required("PEXELS_API_BASE", "https://api.pexels.com/v1"),
 };

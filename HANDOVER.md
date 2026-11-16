@@ -74,6 +74,7 @@ IMAGE_MODEL=doubao-seedream-4-5-251128
 IMAGE_QUALITY=hd            # 4.5 仅 2K/4K；standard 自动升 2K
 METASO_API_KEY=...          # MiniMax H3 生视频
 VIDEO_MODEL=MiniMax-H3
+PEXELS_API_KEY=...          # 灵感搜索（没有就跳过 search_inspiration）
 LOOMIC_AGENT_MODEL=deepseek-v4-flash
 ```
 

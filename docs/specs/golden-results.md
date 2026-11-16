@@ -47,6 +47,7 @@
 | G37 一致性策略 | 通过（30/30） | strict 缺实拍拒绝；adaptive 允许生成设定图并 warning；loose 允许无 canon/首帧草稿、不强制末帧衔接（`docs/notes/M29.md`） |
 | G38 保温杯 10 秒广告完整对话 | 通过（7/7，真实模型回放） | 从一句需求开始，3 轮后停在视频前：2 镜分镜、产品/主视觉锚图、第 1 镜首尾帧；0 次 `generate_video`（`docs/notes/M30.md`，HTML 在 `verification/video-conversation-2026-11-16/`） |
 | G39 普通用户版回放 | 通过（8/8，真实模型回放） | 用户只说“发抖音/竖着拍/早上上班/干净/没有照片”，Agent 自己补全 9:16、晨间通勤、adaptive 设定图；第 1 镜首尾帧；视频前停下；没有“和实物一致”的不当承诺（`docs/notes/M31.md`） |
+| G40 灵感搜索工具 | 契约通过（9/9，假 fetch；真实 key 待配） | Pexels 映射、主图、Authorization、2 组方向卡片、401/空词错误；UI 可把选中图加入对话（`docs/notes/M32.md`） |
 
 ## 当前失败/缺口
 

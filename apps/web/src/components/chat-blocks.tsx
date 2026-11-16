@@ -294,6 +294,9 @@ function InspirationCard({
         <span className="ml-auto text-[10px] text-faint">{block.items.length} 条</span>
       </div>
       <p className="mt-1.5 text-[12px] text-muted">{block.query}</p>
+      <p className="mt-1 text-[10.5px] text-faint">
+        点缩略图右上角箭头加入对话，选一张作为方向；也可以回复“第 2 组第 1 张”。
+      </p>
 
       <div className="mt-2.5 grid grid-cols-2 gap-2">
         {block.items.map((item) => {
