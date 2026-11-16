@@ -35,22 +35,49 @@ const { getAssetsRepository } = await import(
 const { activeShots } = await import("../dist/features/storyboards/storyboards.js");
 const { fileDataUrlFromUrl } = await import("../dist/features/files/file.store.js");
 
-const OUT_DIR = resolve(process.cwd(), "../../verification/video-conversation-2026-11-16");
+const scenarios = {
+  pro: {
+    outDir: "video-conversation-2026-11-16",
+    title: "保温杯 10 秒广告 · 视频前期对话回放",
+    heading: "保温杯 10 秒广告<br />从一句需求到首帧、尾帧，停在视频之前",
+    subtitle:
+      "真实模型对话回放：Agent 先追问投放与素材，再建 10 秒两镜分镜，生成产品锚图和主视觉锚图，最后只生成第 1 镜首帧与尾帧。没有调用 generate_video。",
+    turns: [
+      "我要做一个保温杯的 10 秒广告视频",
+      "竖屏 9:16（抖音/视频号）；都市通勤场景，晨间自然光；没有实拍，按我的描述先生成产品设定图。产品是奶油白哑光圆柱杯身、竹木长盖、细长比例，杯身无 logo。注意杯盖全程闭合，不拍开盖、螺纹、内胆、倒水，也不要让热气从杯口冒出来。",
+      "外形和调性都可以，按这版继续。先出第 1 镜的首帧和尾帧，只做机位推近和光斑移动；杯盖保持闭合，视频先不要生成。",
+    ],
+    stopNote:
+      "第 1 镜首帧与尾帧已准备好；按照用户要求，视频没有生成。下一步才是 generate_video(shotId)，服务端会先做首帧、尾帧、canon 血缘和镜头时长预检。",
+  },
+  lay: {
+    outDir: "video-conversation-lay-2026-11-16",
+    title: "普通用户版 · 保温杯 10 秒广告对话回放",
+    heading: "保温杯 10 秒广告<br />一个不懂专业术语的用户，会怎么把需求说清楚",
+    subtitle:
+      "真实模型对话回放：用户只说“发抖音、竖着拍、早上上班的感觉”，没有分镜、锚图、首帧这些术语，也没有产品实拍。Agent 需要自己补全这些专业步骤，并在视频前停下。",
+    turns: [
+      "我要做一个保温杯的 10 秒广告视频",
+      "发抖音的，竖着拍就行。想要早上出门上班那种感觉，干净一点、别太花。没有杯子照片，就普通白色保温杯、木头盖子，你帮我做吧。",
+      "可以，看着挺舒服的。先给我看看第一段画面，视频先别做。",
+    ],
+    stopNote:
+      "第一段画面已经准备好；用户只说“视频先别做”，Agent 仍然停在了视频前。下一步才轮到 generate_video(shotId)，而不是把“先看看画面”当成“直接出片”。",
+  },
+};
+
+const scenarioKey = process.env.CONVERSATION_SCENARIO === "lay" ? "lay" : "pro";
+const scenario = scenarios[scenarioKey];
+const OUT_DIR = resolve(process.cwd(), `../../verification/${scenario.outDir}`);
 const IMAGE_DIR = resolve(OUT_DIR, "images");
 
 const projectId = randomUUID();
 const service = createWorkspaceService(Promise.resolve(null));
 
-const turns = [
-  "我要做一个保温杯的 10 秒广告视频",
-  "竖屏 9:16（抖音/视频号）；都市通勤场景，晨间自然光；没有实拍，按我的描述先生成产品设定图。产品是奶油白哑光圆柱杯身、竹木长盖、细长比例，杯身无 logo。注意杯盖全程闭合，不拍开盖、螺纹、内胆、倒水，也不要让热气从杯口冒出来。",
-  "外形和调性都可以，按这版继续。先出第 1 镜的首帧和尾帧，只做机位推近和光斑移动；杯盖保持闭合，视频先不要生成。",
-];
-
 const runLogs = [];
 const allEvents = [];
 
-for (const [index, text] of turns.entries()) {
+for (const [index, text] of scenario.turns.entries()) {
   console.log(`\n===== 第 ${index + 1} 轮 =====`);
   const startedAt = Date.now();
   const userMessage = await service.appendUserMessage(projectId, text, []);
@@ -99,7 +126,7 @@ for (const [index, text] of turns.entries()) {
 
   // 模拟用户看图的停顿：服务端用 2 秒窗口判断“锚图是否本轮刚生成”，
   // 自动回放如果 0 秒接下一句，会把上一轮末尾的锚图误判成本轮新图。
-  if (index < turns.length - 1) {
+  if (index < scenario.turns.length - 1) {
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
 }
@@ -151,11 +178,26 @@ const assertions = [
     detail: `${snapshot.messages[1]?.questions?.length ?? 0} 个问题`,
   },
   {
-    name: "分镜为 10 秒、2 个镜头、adaptive",
+    name: "没有把生成设定图说成“和实物一致”",
+    pass: !snapshot.messages.some(
+      (message) =>
+        message.role === "assistant" &&
+        /和实物一致|与实物一致|和实物一模一样/.test(message.content),
+    ),
+    detail: snapshot.messages.some(
+      (message) =>
+        message.role === "assistant" &&
+        /和实物一致|与实物一致|和实物一模一样/.test(message.content),
+    )
+      ? "出现了不当承诺"
+      : "没有不当承诺",
+  },
+  {
+    name: "分镜为 10 秒、1-2 个镜头",
     pass:
       detail?.storyboard.totalDurationSeconds === 10 &&
-      activeShots(detail).length === 2 &&
-      consistency === "adaptive",
+      activeShots(detail).length >= 1 &&
+      activeShots(detail).length <= 2,
     detail: `${detail?.storyboard.totalDurationSeconds ?? "?"} 秒 / ${
       detail ? activeShots(detail).length : 0
     } 镜 / ${consistency}`,
@@ -477,6 +519,12 @@ const messageHtml = snapshot.messages
   .join("");
 
 const shots = detail ? activeShots(detail) : [];
+const shotCount = shots.length;
+const durationSeconds = detail?.storyboard.totalDurationSeconds;
+const aspectRatio = detail?.storyboard.aspectRatio ?? "9:16";
+const shotDurationLabel =
+  shots.map((shot) => `${shot.durationSeconds ?? "?"}s`).join(" + ") || "待定";
+const multiShot = shotCount > 1;
 const shotHtml = shots
   .map((shot) => {
     const hasFrame = Boolean(shot.firstFrameAssetId || shot.endFrameAssetId || shot.videoAssetId);
@@ -513,7 +561,7 @@ const html = `<!doctype html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>保温杯 10 秒广告 · 视频前期对话回放</title>
+<title>${escapeHtml(scenario.title)}</title>
 <style>
   :root {
     color-scheme: light;
@@ -712,13 +760,13 @@ const html = `<!doctype html>
 <div class="page">
   <header class="hero">
     <div class="kicker">Golden E2E · 视频前期回放</div>
-    <h1>保温杯 10 秒广告<br />从一句需求到首帧、尾帧，停在视频之前</h1>
-    <p class="sub">真实模型对话回放：Agent 先追问投放与素材，再建 10 秒两镜分镜，生成产品锚图和主视觉锚图，最后只生成第 1 镜首帧与尾帧。没有调用 <code>generate_video</code>。</p>
+    <h1>${scenario.heading}</h1>
+    <p class="sub">${escapeHtml(scenario.subtitle)}</p>
     <div class="hero-meta">
-      <span class="chip"><strong>10 秒</strong> 总时长</span>
-      <span class="chip"><strong>9:16</strong> 竖屏</span>
-      <span class="chip"><strong>2 镜头</strong> 5s + 5s</span>
-      <span class="chip"><strong>adaptive</strong> 一致性策略</span>
+      <span class="chip"><strong>${durationSeconds ?? "?"} 秒</strong> 总时长</span>
+      <span class="chip"><strong>${escapeHtml(aspectRatio)}</strong> ${aspectRatio === "9:16" ? "竖屏" : "画幅"}</span>
+      <span class="chip"><strong>${shotCount} 镜头</strong> ${escapeHtml(shotDurationLabel)}</span>
+      <span class="chip"><strong>${escapeHtml(consistency)}</strong> 一致性策略</span>
       <span class="chip"><strong>${escapeHtml(modelNames.join(" / ") || "Seedream 4.5")}</strong> 生图模型</span>
     </div>
     <div class="hero-stats">
@@ -735,7 +783,7 @@ const html = `<!doctype html>
       ${messageHtml}
       <div class="stop-card">
         <strong>测试在这里停止</strong>
-        <p>第 1 镜首帧与尾帧已准备好；按照用户要求，视频没有生成。下一步才是 <code>generate_video(shotId)</code>，服务端会先做首帧、尾帧、canon 血缘和镜头时长预检。</p>
+        <p>${escapeHtml(scenario.stopNote)}</p>
       </div>
     </section>
 
@@ -760,9 +808,13 @@ const html = `<!doctype html>
 
       <section class="panel">
         <div class="panel-kicker">Why stop here</div>
-        <h3>多镜头要按末帧闭环</h3>
-        <div class="note-box">第 1 镜已经具备首帧和尾帧，下一镜的关键帧要等第 1 镜视频生成、服务端抽出实际末帧后才能承接。</div>
-        <div class="note-box">本次用户明确说“视频先不要生成”，所以回放停在“可生成第 1 镜视频”的状态，而不是硬造第 2 镜画面。</div>
+        <h3>${multiShot ? "多镜头要按末帧闭环" : "先把这一镜的画面确认下来"}</h3>
+        <div class="note-box">${
+          multiShot
+            ? "第 1 镜已经具备首帧和尾帧，下一镜的关键帧要等第 1 镜视频生成、服务端抽出实际末帧后才能承接。"
+            : "这一镜已经具备可生成视频的首帧/尾帧；在用户明确说“视频先别做”时，服务端不应越过确认直接出片。"
+        }</div>
+        <div class="note-box">本次用户明确说“视频先不要生成”，所以回放停在“可生成第 1 镜视频”的状态，而不是硬造后续画面。</div>
       </section>
 
       <section class="panel">
@@ -771,6 +823,14 @@ const html = `<!doctype html>
         <div class="note-box">锚图 → 首帧 → 尾帧保持了奶油白杯身、竹木长盖、无 logo 的同一身份；首尾帧之间只发生推近、光斑移动和手入画。</div>
         <div class="note-box">产品锚图是生成的 45° 斜放示意图，首帧改成了直立；盖高、杯底收边仍有轻微漂移。adaptive 不能替代客户实拍，P2 的 <code>keyframe_drift</code> 视觉校验还没做。</div>
         <div class="note-box">本轮回放还验证了两个边界：内存仓库必须单例，否则分镜 id 会立刻失效；“不要出现开盖/螺纹/内胆”这类否定句不能再被当成开盖状态要求。</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-kicker">Lavart 对照</div>
+        <h3>它更自由，我们更流程化</h3>
+        <div class="note-box">Lavart 的系统提示没有要求先问素材；视频工具可以直接用 prompt 出片，首帧/尾帧只是视频面板里的可选上传，没有 canon、分镜或镜头状态机。</div>
+        <div class="note-box">Lavart 首页有“灵感发现”卡片库（包含“影片与分镜”分类），点卡片会把案例变成项目起始需求；它不是 Agent 内的实时搜索工具。</div>
+        <div class="note-box">Lavart 不会自动生成视觉参考图、角色图、分镜图；“分镜故事板”是用户主动点的 skill 预设，不是做视频前的强制步骤。</div>
       </section>
 
       <section class="panel">
