@@ -1427,9 +1427,21 @@ export function createAgentTools(context: ToolContext) {
         }
 
         const total = blocks.reduce((sum, block) => sum + block.items.length, 0);
+        const selection = blocks.map((block, groupIndex) => ({
+          group: groupIndex + 1,
+          label: block.query.split("｜")[0],
+          items: block.items.map((item, itemIndex) => ({
+            ref: `G${groupIndex + 1}-${itemIndex + 1}`,
+            index: itemIndex + 1,
+            title: item.title,
+            imageUrl: item.imageUrl,
+            source: item.source,
+          })),
+        }));
         return JSON.stringify({
-          summary: `找到 ${blocks.length} 组方向、${total} 张灵感图${failures.length ? `；${failures.length} 组失败` : ""}。请让用户看图选方向，选定后再生成。`,
+          summary: `找到 ${blocks.length} 组方向、${total} 张灵感图${failures.length ? `；${failures.length} 组失败` : ""}。请让用户看图选方向，选定后再生成。用户说“第几组第几张”时，按 selection 里的 group/items 顺序对应（组顺序即展示顺序，张顺序即卡片顺序），把选中的 imageUrl 直接作为 generate_image 的 inputImages 使用，不要重新搜图。`,
           artifacts: blocks,
+          selection,
           directions: blocks.map((block) => block.query),
           ...(failures.length ? { warnings: failures } : {}),
         });

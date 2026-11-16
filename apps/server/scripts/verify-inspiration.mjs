@@ -133,6 +133,20 @@ try {
     typeof output.summary === "string" && output.summary.includes("让用户看图选方向"),
     output.summary,
   );
+  check(
+    "工具返回可文字引用的 selection 编号",
+    Array.isArray(output.selection) &&
+      output.selection.length === 2 &&
+      output.selection[0].items[1].ref === "G1-2" &&
+      output.selection[1].items[0].ref === "G2-1" &&
+      output.selection[1].items[0].imageUrl ===
+        "https://images.pexels.com/photos/101/large2x.jpg",
+    JSON.stringify(output.selection?.[0]?.items?.map((item) => item.ref)),
+  );
+  check(
+    "summary 说明“第几组第几张”直接映射到 imageUrl",
+    output.summary.includes("第几组第几张") && output.summary.includes("inputImages"),
+  );
 
   responseMode = "unauthorized";
   let authError = "";

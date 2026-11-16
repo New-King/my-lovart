@@ -277,29 +277,35 @@ function ArtifactRow({
 
 function InspirationCard({
   block,
+  groupIndex,
   onPreview,
   onAddReference,
 }: {
   block: InspirationBlock;
+  groupIndex: number;
   onPreview: Props["onPreview"];
   onAddReference: Props["onAddReference"];
 }) {
   const toast = useToast();
+  const [label, query] = block.query.split("｜");
 
   return (
     <section className="rounded-xl border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
         <ImagePlus className="size-3.5 text-faint" strokeWidth={1.75} />
-        <span className="font-mono text-[9px] tracking-[0.16em] text-faint">灵感参考</span>
+        <span className="font-mono text-[9px] tracking-[0.16em] text-faint">
+          灵感参考 · 第 {groupIndex} 组
+        </span>
         <span className="ml-auto text-[10px] text-faint">{block.items.length} 条</span>
       </div>
-      <p className="mt-1.5 text-[12px] text-muted">{block.query}</p>
+      <p className="mt-1.5 text-[12px] text-muted">{label}</p>
+      {query ? <p className="mt-0.5 text-[10px] text-faint">{query}</p> : null}
       <p className="mt-1 text-[10.5px] text-faint">
-        点缩略图右上角箭头加入对话，选一张作为方向；也可以回复“第 2 组第 1 张”。
+        点缩略图右上角箭头加入对话；也可以回复“第 {groupIndex} 组第 1 张”。
       </p>
 
       <div className="mt-2.5 grid grid-cols-2 gap-2">
-        {block.items.map((item) => {
+        {block.items.map((item, index) => {
           const mimeType = guessMimeTypeFromUrl(item.imageUrl);
           return (
             <div
@@ -328,6 +334,9 @@ function InspirationCard({
                   }
                   className="aspect-[4/3] w-full cursor-grab object-cover transition-opacity group-hover:opacity-90 active:cursor-grabbing"
                 />
+                <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-ink/70 px-1.5 py-0.5 font-mono text-[9px] text-white">
+                  {groupIndex}.{index + 1}
+                </span>
                 <div className="px-2 py-1.5">
                   <p className="truncate text-[11.5px] text-ink">{item.title}</p>
                   <p className="truncate text-[10px] text-faint">{item.source}</p>
@@ -365,11 +374,12 @@ function TextBlockView({ text }: { text: string }) {
 export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onAddReference }: Props) {
   type Unit =
     | { key: string; kind: "text"; block: TextBlock }
-    | { key: string; kind: "inspiration"; block: InspirationBlock }
+    | { key: string; kind: "inspiration"; block: InspirationBlock; groupIndex: number }
     | { key: string; kind: "media"; items: MediaBlock[] };
 
   const units: Unit[] = [];
   const mediaByBatch = new Map<string, number>();
+  let inspirationGroups = 0;
 
   for (const block of blocks) {
     if (block.type === "tool") continue;
@@ -380,7 +390,13 @@ export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onAddReference }:
     }
 
     if (block.type === "inspiration") {
-      units.push({ key: `insp-${block.id}`, kind: "inspiration", block });
+      inspirationGroups += 1;
+      units.push({
+        key: `insp-${block.id}`,
+        kind: "inspiration",
+        block,
+        groupIndex: inspirationGroups,
+      });
       continue;
     }
 
@@ -407,6 +423,7 @@ export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onAddReference }:
             <InspirationCard
               key={unit.key}
               block={unit.block}
+              groupIndex={unit.groupIndex}
               onPreview={onPreview}
               onAddReference={onAddReference}
             />

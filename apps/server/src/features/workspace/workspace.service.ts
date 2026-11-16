@@ -340,6 +340,13 @@ export function createWorkspaceService(
         historyChars += message.content.length;
       }
 
+      // 用户用“第 2 组第 3 张”选图时，把上一轮灵感卡片的编号注入本轮上下文；
+      // 灵感块存在消息 blocks 里（DB/内存都保留），不需要再依赖工具输出留在 thread 里。
+      const lastInspirationXml = buildLastInspirationContext(
+        ensureWorkspace(projectId).messages,
+        input.text,
+      );
+
       const assetRepo = await getAssetsRepository();
       let storedAssets: ProjectAsset[] = [];
       try {
@@ -479,6 +486,7 @@ export function createWorkspaceService(
             canvasElements: ensureWorkspace(projectId).elements,
             canvasFiles: ensureWorkspace(projectId).files,
             projectStateXml: projectState.xml,
+            ...(lastInspirationXml ? { lastInspirationXml } : {}),
             baseUrl,
             signal,
             trace,
@@ -664,6 +672,37 @@ function collectRunAttachments(
   }
 
   return result;
+}
+
+/** 用户这句是不是在按“第几组第几张 / G2-3”选图；只有这种句子才注入灵感编号。 */
+const INSPIRATION_SELECTION = /第\s*[一二三四五六七八九十两0-9]+\s*[组張张]|[Gg]\s*\d+\s*[-－]\s*\d+/;
+
+/**
+ * 最近的灵感卡片编号 + 图片地址。
+ * 灵感卡片存在消息 blocks 里，服务端每轮都能读到；不依赖工具输出是否还在 thread 里。
+ */
+function buildLastInspirationContext(messages: ChatMessage[], text: string): string {
+  if (!INSPIRATION_SELECTION.test(text)) return "";
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const blocks = messages[index]?.blocks ?? [];
+    const groups = blocks.filter((block) => block.type === "inspiration");
+    if (groups.length === 0) continue;
+
+    const lines = groups.map((group, groupIndex) => {
+      const [label = "", query = ""] = group.query.split("｜");
+      const head = `第 ${groupIndex + 1} 组 · ${label}${query ? `｜${query}` : ""}`;
+      const items = group.items.map(
+        (item, itemIndex) =>
+          `  第 ${itemIndex + 1} 张 · ${item.title} · ${item.imageUrl}`,
+      );
+      return [head, ...items].join("\n");
+    });
+
+    return `<last_inspiration>\n${lines.join("\n")}\n</last_inspiration>`;
+  }
+
+  return "";
 }
 
 function applyEvent(projectId: string, messageId: string, event: RunEvent): void {

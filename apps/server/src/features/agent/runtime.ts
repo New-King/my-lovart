@@ -42,6 +42,8 @@ export type AgentRunInput = {
   canvasFiles: Record<string, unknown>;
   /** 结构化分镜摘要，构建 <project_state> 用 */
   projectStateXml?: string;
+  /** 上一轮灵感卡片的编号映射，用户用“第几组第几张”选图时注入 */
+  lastInspirationXml?: string;
   baseUrl: string;
   signal: AbortSignal;
   /** LangGraph checkpointer；有它时不再手工拼 history，避免重复 */
@@ -830,6 +832,12 @@ function buildUserText(
     blocks.push(projectAssetsXml);
     blocks.push(
       "<project_assets_note>这些是项目里生成过的资产，id 稳定；引用旧图、改图、分镜重做时先用 list_assets/get_asset，不要凭记忆或画布位置猜。</project_assets_note>",
+    );
+  }
+  if (input.lastInspirationXml) {
+    blocks.push(input.lastInspirationXml);
+    blocks.push(
+      "<last_inspiration_note>用户用“第几组第几张”选图时，按这里的编号定位（组=卡片顺序，张=组内顺序），直接用对应 imageUrl 作为 inputImages；不要重新 search_inspiration。</last_inspiration_note>",
     );
   }
   if (attachmentXml) {
