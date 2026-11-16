@@ -2,6 +2,7 @@ import type {
   StoryboardDetail,
   StoryboardSummary,
 } from "./storyboards.js";
+import { readConsistencyPolicy } from "./policy.js";
 
 const MAX_BOARDS = 8;
 const MAX_DESCRIPTION = 180;
@@ -47,7 +48,7 @@ export function buildProjectStateContext(
   for (const board of visibleBoards) {
     if (active && board.id === active.storyboard.id) continue;
     others.push(
-      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" status="${board.status}" shots="${board.shotCount}" active="${board.active}"${
+      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" status="${board.status}" shots="${board.shotCount}" active="${board.active}" consistency="${readConsistencyPolicy(board)}"${
         board.aspectRatio ? ` aspect="${escapeXml(board.aspectRatio)}"` : ""
       }${board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""}${
         board.canonAssetId ? ` product_anchor_id="${escapeXml(board.canonAssetId)}"` : ""
@@ -85,7 +86,7 @@ export function buildProjectStateContext(
         }${shot.sceneGoal ? ` goal="${escapeXml(clip(shot.sceneGoal, 40))}"` : ""}>${escapeXml(clip(shot.description || shot.prompt))}</shot>`,
     );
     lines.push(
-      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" aspect="${escapeXml(board.aspectRatio ?? "")}" status="${board.status}" active="${board.active}" shots="${shots.length}"${
+      `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" aspect="${escapeXml(board.aspectRatio ?? "")}" status="${board.status}" active="${board.active}" shots="${shots.length}" consistency="${readConsistencyPolicy(board)}"${
         board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""
       }${board.canonAssetId ? ` product_anchor_id="${escapeXml(board.canonAssetId)}"` : ""}${
         board.productDetailAnchorAssetId

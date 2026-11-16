@@ -57,6 +57,12 @@ export function buildApp() {
 
   app.log.info({ traceDir: TRACE_DIR, pid: process.pid }, "运行 trace 已启用");
 
+  /** 只读模型目录：后台/前端选模型用，不含任何 key；切换仍由服务端环境变量控制。 */
+  app.get("/generation/models", async () => {
+    const { getGenerationConfig } = await import("./features/generation/index.js");
+    return getGenerationConfig();
+  });
+
   // 预热执行记忆；失败只 warning，不阻塞消息/画布
   void import("./features/agent/persistence/checkpointer.js")
     .then((mod) => mod.getCheckpointer())

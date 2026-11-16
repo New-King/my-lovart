@@ -100,6 +100,8 @@ export type CreateStoryboardInput = {
   style?: string;
   canonAssetId?: string;
   totalDurationSeconds?: number;
+  /** 自由元数据；视频一致性策略写在 metadata.consistency */
+  metadata?: Record<string, unknown>;
   shots: StoryboardShotInput[];
 };
 
@@ -113,6 +115,8 @@ export type UpdateStoryboardInput = {
   totalDurationSeconds?: number;
   status?: StoryboardStatus;
   active?: boolean;
+  /** 合并进现有 metadata；传 { consistency: "strict" } 可切换一致性策略 */
+  metadata?: Record<string, unknown>;
 };
 
 export type UpdateShotInput = {

@@ -255,7 +255,10 @@ function assertShots(input: CreateStoryboardInput): void {
   assertVideoTimeline(input.kind, input.totalDurationSeconds, input.shots);
 }
 
-function boardPatch(patch: UpdateStoryboardInput): Record<string, unknown> {
+function boardPatch(
+  patch: UpdateStoryboardInput,
+  metadata?: Record<string, unknown>,
+): Record<string, unknown> {
   const value: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.title !== undefined) value.title = patch.title;
   if (patch.brief !== undefined) value.brief = patch.brief;
@@ -266,6 +269,7 @@ function boardPatch(patch: UpdateStoryboardInput): Record<string, unknown> {
   if (patch.totalDurationSeconds !== undefined) {
     value.total_duration_seconds = patch.totalDurationSeconds;
   }
+  if (metadata !== undefined) value.metadata = metadata;
   if (patch.status !== undefined) value.status = patch.status;
   if (patch.active !== undefined) value.active = patch.active;
   return value;
@@ -428,6 +432,7 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
           style: input.style ?? null,
           canon_asset_id: input.canonAssetId ?? null,
           total_duration_seconds: input.totalDurationSeconds ?? null,
+          metadata: input.metadata ?? {},
           status: "draft",
           active: true,
         })
@@ -481,11 +486,27 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
       }
       const { error } = await db()
         .from("storyboards")
-        .update(boardPatch(patch))
+        .update(
+          boardPatch(
+            patch,
+            patch.metadata
+              ? { ...detail.storyboard.metadata, ...patch.metadata }
+              : undefined,
+          ),
+        )
         .eq("id", storyboardId)
         .eq("project_id", projectId);
       if (error) throw error;
-      return { ...detail, storyboard: { ...detail.storyboard, ...patch } };
+      return {
+        ...detail,
+        storyboard: {
+          ...detail.storyboard,
+          ...patch,
+          metadata: patch.metadata
+            ? { ...detail.storyboard.metadata, ...patch.metadata }
+            : detail.storyboard.metadata,
+        },
+      };
     },
 
     async updateShot(projectId, shotId, patch) {
@@ -919,7 +940,7 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
           : {}),
         status: "draft",
         active: true,
-        metadata: {},
+        metadata: input.metadata ?? {},
         createdAt: now,
         updatedAt: now,
       };
@@ -961,6 +982,9 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       board.detail.storyboard = {
         ...board.detail.storyboard,
         ...patch,
+        metadata: patch.metadata
+          ? { ...board.detail.storyboard.metadata, ...patch.metadata }
+          : board.detail.storyboard.metadata,
         updatedAt: new Date().toISOString(),
       };
       return board.detail;

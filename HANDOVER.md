@@ -69,12 +69,15 @@ supabase        migrations
 
 ```
 GENERATION_MODE=real        # mock | real
-VOLCES_API_KEY=...          # Seedream 生图
-VOLCES_IMAGE_MODEL=doubao-seedream-5-0-260128
+ARK_API_KEY=...             # 优先；旧 VOLCES_API_KEY 仍兼容（Seedream 生图）
+IMAGE_MODEL=doubao-seedream-4-5-251128
+IMAGE_QUALITY=hd            # 4.5 仅 2K/4K；standard 自动升 2K
 METASO_API_KEY=...          # MiniMax H3 生视频
-METASO_VIDEO_MODEL=MiniMax-H3
+VIDEO_MODEL=MiniMax-H3
 LOOMIC_AGENT_MODEL=deepseek-v4-flash
 ```
+
+模型注册表见 `docs/specs/generation-providers.md`；新增渠道只实现 adapter 并注册，不要改 worker/工具的业务分支。
 
 `generationMode=real` 时所有消息都走 `apps/server/src/features/agent`：LangGraph + deepagents 的 tool loop，模型自己决定聊天还是调 `generate_image` / `generate_video` / `inspect_canvas`。没有关键词分流。生成结果会先下载进 `/files/:id`。
 

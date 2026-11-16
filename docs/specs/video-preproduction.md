@@ -1,8 +1,8 @@
 # 视频前期：锚图组、关键帧、镜头时长与连贯性
 
-> 状态：Phase 3a/3b/3c/3d 已实现（多镜头拼接未实现）
+> 状态：Phase 3a/3b/3c/3d/3e 已实现（多镜头拼接未实现）
 > 最后更新：2026-11-16
-> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/notes/M25.md`、`docs/notes/M27.md`、`docs/specs/project-state-and-storyboard.md`
+> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/notes/M25.md`、`docs/notes/M27.md`、`docs/notes/M29.md`、`docs/specs/project-state-and-storyboard.md`
 
 ## 问题
 
@@ -32,11 +32,21 @@
 
 | 层 | 角色 | 数量 | 是否进视频 | 生成方式 |
 | --- | --- | --- | --- | --- |
-| 锚图组 | `canon` + `anchorType=product/product_detail/character/scene/style` | 产品锚 1 张必需；开盖/内胆等状态另需 product_detail；其余按需 | 否，只做参考 | 产品锚/细节锚必须基于用户实拍图；其余可文生图；确认后锁定 |
+| 锚图组 | `canon` + `anchorType=product/product_detail/character/scene/style` | 产品锚 1 张；开盖/内胆等状态另需 product_detail；其余按需 | 否，只做参考 | strict：产品锚/细节锚必须真实实拍；adaptive：有实拍用实拍，没有可生成并标注；loose：可直接生成；确认后锁定 |
 | 分镜首尾帧 | `keyframe` / `end_frame` | 每镜 1 张首帧；多镜头除收尾外必须有尾帧 | 首帧作为视频第一帧，尾帧作为最后一帧 | 自动引用锚图组 + 上一镜尾帧（首帧）或当前首帧（尾帧） |
 | 成片片段 | `video` | 每镜 1 条 | 最终交付 | `generate_video(shotId)`，首尾帧和时长由镜头锁定 |
 
-`planImageReferences` 在生成关键帧时默认带：当前已确认首帧 → 产品锚 → 细节锚 → 主视觉/衔接帧（最多 4 张）；scene/character 不再默认稀释产品主体。开盖/螺纹/内胆/倒水等状态没有 `product_detail` 锚图会直接返回 `product_state_reference_required`。生成结果记录 `metadata.role` 与 `sourceAssetIds`；出片预检校验首帧产品锚血缘和上一镜实际末帧。
+## 一致性策略（per-storyboard）
+
+一致性不是全局写死的一套流程，而是每个分镜自己的 `metadata.consistency`：
+
+- `strict`：客户有产品实拍，或明确要求“不能变形/必须还原真实产品”。产品锚、细节锚必须有真实参考；多镜头必须按实际末帧衔接；缺环就拒绝。
+- `adaptive`（默认）：有实拍就用实拍；没有实拍允许生成产品设定图并返回 `warning` 说明“这是生成图，不是客户真实产品”。开盖/内部状态仍需先有细节锚图，但细节锚可以基于产品设定图生成草案；多镜头按末帧衔接。
+- `loose`：快速概念/草稿。允许无 canon/首帧直接出片，不强制多镜头末帧衔接；仍保留 `video_plan_unconfirmed`，脚本必须先给用户看到。输出会有风险提示。
+
+`create_storyboard` / `update_storyboard` 传 `consistency`；旧分镜默认 adaptive，不需要新 migration。`<project_state>` 会带 `consistency`，Agent 按当前档位决定是否补素材。
+
+`planImageReferences` 在生成关键帧时默认带：当前已确认首帧 → 产品锚 → 细节锚 → 主视觉/衔接帧（最多 4 张）；scene/character 不再默认稀释产品主体。strict/adaptive 下开盖/螺纹/内胆/倒水等状态没有 `product_detail` 锚图会返回 `product_state_reference_required`，loose 可跳过。生成结果记录 `metadata.role` 与 `sourceAssetIds`；出片预检校验首帧产品锚血缘和上一镜实际末帧。
 
 ## 连贯性方案
 
@@ -72,10 +82,10 @@ migration `0010` / `0011` / `0012`（已执行）：
 
 ## 流程
 
-1. 需求：平台/画幅、总时长、基调；产品锚必须要求用户上传正面/侧面/背面/俯视实拍图。
+1. 需求：平台/画幅、总时长、基调；根据客户是否提供产品实拍、是否要求还原选择 consistency。strict 需要正面/侧面/背面/俯视实拍；adaptive 没有实拍也能先生成设定图；loose 直接出草稿。
 2. 脚本：按镜头列画面、运镜、节奏、sceneGoal、continuityNote、negativePrompt。
-3. `create_storyboard({kind:"video", totalDurationSeconds, shots})`：只写文字时间线。
-4. 生成锚图组：`generate_image({role:"canon", anchorType:"product", storyboardId, inputImages:[产品图]})`；开盖/内胆/螺纹再加 `anchorType:"product_detail"`。本轮给用户确认，不能同轮出关键帧（`canon_unconfirmed`）。
+3. `create_storyboard({kind:"video", totalDurationSeconds, consistency, shots})`：只写文字时间线。
+4. 生成锚图组：`generate_image({role:"canon", anchorType:"product", storyboardId, inputImages:[产品图]})`；有实拍就传，没有实拍按策略生成并标注。开盖/内胆/螺纹再加 `anchorType:"product_detail"`。strict/adaptive 本轮给用户确认，不能同轮出关键帧（`canon_unconfirmed`）。
 5. 下一轮按镜序闭环：镜头 1 keyframe + end_frame → 用户确认 → `generate_video(shot1)` → 服务端抽实际末帧。
 6. 镜头 2 keyframe 承接镜头 1 实际末帧 → end_frame → 确认 → 出片 → 抽末帧，依此类推。
 7. 多镜头全部完成后，才进入拼接成片。
@@ -88,9 +98,10 @@ migration `0010` / `0011` / `0012`（已执行）：
 
 ## 验收
 
-`apps/server/scripts/verify-video-guard.mjs`，24/24 通过，不调用图片/视频 provider；`verify-video-frame.mjs` 通过（生成 1 秒测试视频并抽末帧）：
+`apps/server/scripts/verify-video-guard.mjs`，29/29 通过，不调用图片/视频 provider；`verify-video-frame.mjs` 通过（生成 1 秒测试视频并抽末帧）：
 
-- 无产品实拍 → `canon_photo_required`；无细节实拍 → `detail_photo_required`
+- strict 无产品实拍 → `canon_photo_required`；strict 无细节实拍 → `detail_photo_required`
+- adaptive 无产品实拍 → 允许生成设定图并返回 warning；adaptive 无细节实拍 → 允许生成细节锚草案
 - 无 shotId → `video_plan_required`
 - 5 秒拆 4 镜头 / 概念板直接转视频 → 校验拒绝
 - 本轮新建镜头 → `video_plan_unconfirmed`
@@ -108,4 +119,5 @@ migration `0010` / `0011` / `0012`（已执行）：
 - 没承接实际末帧的首帧 → `continuity_not_anchored`
 - 两镜末帧接通 → 放行
 - 重做同一镜首帧 → 当前已确认首帧是第一参考
+- loose 无 canon/首帧 → 允许直接生成草稿；loose 多镜头 → 不强制末帧衔接
 - `direct=true` 显式跳过

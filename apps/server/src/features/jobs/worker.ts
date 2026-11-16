@@ -6,10 +6,9 @@ import { getAssetsRepository } from "../assets/assets.repository.js";
 import type { ProjectAsset } from "../assets/assets.js";
 import { insertImageOnCanvas, insertVideoOnCanvas } from "../canvas/server-canvas.js";
 import { importFileBuffer, importRemoteFile } from "../files/file.store.js";
-import { generateVideoWithMetaso } from "../generation/metaso-video.js";
+import { generateImage, generateVideo } from "../generation/index.js";
 import { extractVideoLastFrame } from "../generation/video-frame.js";
 import { GenerationError } from "../generation/types.js";
-import { generateImageWithVolces } from "../generation/volces-image.js";
 import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
 import {
   claimNextJob,
@@ -162,6 +161,16 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function asImageQuality(value: unknown): "standard" | "hd" | "ultra" | undefined {
+  return value === "standard" || value === "hd" || value === "ultra" ? value : undefined;
+}
+
+function asVideoResolution(
+  value: unknown,
+): "480p" | "720p" | "1080p" | undefined {
+  return value === "480p" || value === "720p" || value === "1080p" ? value : undefined;
+}
+
 async function executeImageJob(job: BackgroundJob): Promise<Record<string, unknown>> {
   const payload = job.payload;
   const prompt = asString(payload.prompt);
@@ -179,12 +188,15 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     ? payload.sourceAssetIds.filter((item): item is string => typeof item === "string")
     : [];
 
-  await reportProgress(job, 12, "提交 Seedream");
+  await reportProgress(job, 12, "提交生图任务");
+  const imageQuality = asImageQuality(payload.quality);
   const result = await runJobGeneration(job, 5 * 60_000, (signal) =>
-    generateImageWithVolces({
+    generateImage({
       prompt,
       aspectRatio: (asString(payload.aspectRatio) || "3:4") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
       referenceImages: inputImages,
+      ...(asString(payload.model) ? { model: asString(payload.model) } : {}),
+      ...(imageQuality ? { quality: imageQuality } : {}),
       signal,
     }),
   );
@@ -207,7 +219,7 @@ async function executeImageJob(job: BackgroundJob): Promise<Record<string, unkno
     height: result.height,
     title,
     prompt: prompt.slice(0, 2000),
-    model: "Seedream 5.0 Lite",
+    model: result.modelDisplayName,
     aspectRatio: asString(payload.aspectRatio) || "3:4",
     role:
       role === "canon" || role === "keyframe" || role === "end_frame" ? role : "free",
@@ -271,12 +283,15 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     : [];
 
   await reportProgress(job, 8, "提交任务");
+  const videoResolution = asVideoResolution(payload.resolution);
   const result = await runJobGeneration(job, 10 * 60_000, (signal) =>
-    generateVideoWithMetaso({
+    generateVideo({
       prompt,
       aspectRatio: (asString(payload.aspectRatio) || "16:9") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16",
       durationSeconds: asNumber(payload.durationSeconds) ?? 8,
       referenceImages: inputImages,
+      ...(asString(payload.model) ? { model: asString(payload.model) } : {}),
+      ...(videoResolution ? { resolution: videoResolution } : {}),
       signal,
       onProgress: (progress, stage) => {
         void reportProgress(job, progress, stage);
@@ -303,7 +318,7 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
     durationSeconds: result.durationSeconds,
     title,
     prompt: prompt.slice(0, 2000),
-    model: "MiniMax H3",
+    model: result.modelDisplayName,
     sourceAssetIds,
     ...(shotId ? { shotId } : {}),
   };

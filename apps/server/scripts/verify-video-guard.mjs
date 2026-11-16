@@ -44,6 +44,21 @@ try {
 
   const repo = await getStoryboardsRepository();
 
+  const strictBoard = await repo.create(projectId, {
+    title: "严格一致性分镜",
+    brief: "客户要求产品必须还原真实实拍",
+    kind: "image",
+    metadata: { consistency: "strict" },
+    shots: [{ title: "S1" }],
+  });
+  const adaptiveBoard = await repo.create(projectId, {
+    title: "自适应分镜",
+    brief: "没有实拍时允许先出设定图",
+    kind: "image",
+    metadata: { consistency: "adaptive" },
+    shots: [{ title: "S1" }],
+  });
+
   // 1) 没有 shotId：工具应直接返回计划缺失，不提交作业
   const tools = createAgentTools(baseContext(new Date().toISOString()));
   const videoTool = tools.find((item) => item.name === "generate_video");
@@ -64,9 +79,10 @@ try {
   const noPhoto = await planImageReferences(baseContext(new Date().toISOString()), {
     role: "canon",
     anchorType: "product",
+    storyboardId: strictBoard.storyboard.id,
   });
   check(
-    "没有产品实拍时拒绝纯文生图锚图",
+    "strict 策略没有产品实拍时拒绝纯文生图锚图",
     noPhoto.error?.code === "canon_photo_required",
     noPhoto.error?.code ?? "allowed",
   );
@@ -74,11 +90,41 @@ try {
   const noDetailPhoto = await planImageReferences(baseContext(new Date().toISOString()), {
     role: "canon",
     anchorType: "product_detail",
+    storyboardId: strictBoard.storyboard.id,
   });
   check(
-    "没有细节实拍时拒绝纯文生图细节锚图",
+    "strict 策略没有细节实拍时拒绝纯文生图细节锚图",
     noDetailPhoto.error?.code === "detail_photo_required",
     noDetailPhoto.error?.code ?? "allowed",
+  );
+
+  const adaptiveCanon = await planImageReferences(
+    baseContext(new Date().toISOString()),
+    {
+      role: "canon",
+      anchorType: "product",
+      storyboardId: adaptiveBoard.storyboard.id,
+    },
+  );
+  check(
+    "adaptive 策略没有实拍时允许先生成产品设定图并给出警告",
+    !adaptiveCanon.error &&
+      adaptiveCanon.policy === "adaptive" &&
+      /没有产品实拍/.test(adaptiveCanon.warning ?? ""),
+    adaptiveCanon.error?.code ?? adaptiveCanon.warning ?? "allowed",
+  );
+  const adaptiveDetail = await planImageReferences(
+    baseContext(new Date().toISOString()),
+    {
+      role: "canon",
+      anchorType: "product_detail",
+      storyboardId: adaptiveBoard.storyboard.id,
+    },
+  );
+  check(
+    "adaptive 策略没有细节实拍时允许生成细节锚图草案",
+    !adaptiveDetail.error && adaptiveDetail.policy === "adaptive",
+    adaptiveDetail.error?.code ?? "allowed",
   );
 
   // 2) 5 秒拆 4 个镜头应被拒绝（每段至少 4 秒）
@@ -587,6 +633,53 @@ try {
     true,
   );
   check("direct=true 显式跳过前期", direct === null, direct?.code ?? "allowed");
+
+  // 11) loose 策略：没有锚图/首帧也能出片，多镜头不强制末帧衔接
+  const looseBoard = await repo.create(projectId, {
+    title: "快速草稿 10 秒",
+    brief: "用户只要先看两个镜头大概",
+    kind: "video",
+    totalDurationSeconds: 10,
+    metadata: { consistency: "loose" },
+    shots: [
+      { title: "镜头 A", durationSeconds: 5 },
+      { title: "镜头 B", durationSeconds: 5 },
+    ],
+  });
+  await getDb()
+    .from("storyboard_shots")
+    .update({ created_at: hourAgo })
+    .eq("storyboard_id", looseBoard.storyboard.id);
+  const looseShot1 = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    looseBoard.shots[0].id,
+    false,
+  );
+  check(
+    "loose 策略允许无 canon/首帧直接生成草稿",
+    looseShot1 === null,
+    looseShot1?.code ?? "allowed",
+  );
+  const looseShot2 = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    looseBoard.shots[1].id,
+    false,
+  );
+  check(
+    "loose 策略不强制上一镜视频与末帧衔接",
+    looseShot2 === null,
+    looseShot2?.code ?? "allowed",
+  );
+  const looseKeyframe = await planImageReferences(
+    baseContext(new Date().toISOString()),
+    { role: "keyframe", shotId: looseBoard.shots[0].id },
+  );
+  check(
+    "loose 关键帧仍要求先有 canon（可先生成设定图）",
+    looseKeyframe.error?.code === "canon_required" &&
+      looseKeyframe.policy === "loose",
+    looseKeyframe.error?.code ?? "allowed",
+  );
 } catch (error) {
   results.push({ name: "执行验收脚本", ok: false });
   console.error("FAIL 执行验收脚本 —", error instanceof Error ? error.message : error);

@@ -24,7 +24,8 @@
 
 ## 当前状态
 
-- [x] 真实图片（Seedream）与视频（MiniMax）provider 接通
+- [x] 真实图片（Seedream 4.5，可切换渠道）与视频（MiniMax，可切换模型）provider 接通
+- [x] 生成渠道注册表：模型元数据、按 key 条件注册、默认模型解析、只读模型目录接口（M28）
 - [x] LangGraph + deepagents 工具循环，模型自选生成/画布操作
 - [x] SSE 统一事件、取消、失败卡片、重试
 - [x] 画布批量落位、整理、Agent 画布命令（移动/缩放/删除/对齐/分布/层级/透明度）
@@ -128,6 +129,8 @@
 - [x] Phase 3b 连贯性：产品/角色/场景/主视觉锚图组，首尾帧链，上一镜末帧承接下一镜（M24，17/17）
 - [x] Phase 3c 实拍锚定与实际末帧：canon 必须基于产品实拍、canon 确认门禁、ffmpeg 抽末帧、按镜序闭环（M25，20/20 + frame）
 - [x] Phase 3d 产品状态锚图：开盖/螺纹/内胆必须补 product_detail 实拍，否则拒绝关键帧（M27，24/24）
+- [x] Phase 3e 一致性策略可配置：strict / adaptive / loose，客户无参考图不再被全局流程卡死（M29，29/29）
+- [x] 默认生图模型切 Seedream 4.5（2K 画幅 + 模型目录 + 展示名解析，M28，11/11）
 - [ ] 多镜头视频拼接成片（ffmpeg/供应商合成）
 - [ ] 跑 G17–G21、G23（G17/G18/G19/G20 已通过；G21/G23 待补）
 
@@ -168,5 +171,4 @@
 
 ## 下一步（只做这一件）
 
-Phase 3：画布工具深度（add_text / add_shape / add_line / update_style / update_text）。
-视频真机播放与生成中取消留给用户单独测；分镜 UI 作为后续 Phase 4 的一部分。
+用新注册表做一次真实视频前期的 adaptive/strict 对照手测：验证 Seedream 4.5 在“有实拍/无实拍”两种输入下，锚图、关键帧、首尾帧是否按策略产出；仍然停在最终 `generate_video` 前。后台模型选择器等模型目录接口稳定后再做。
