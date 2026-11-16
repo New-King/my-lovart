@@ -46,11 +46,11 @@ const imageSchema = z.object({
     .optional()
     .describe("role=canon 时必填，把设定图挂到这个分镜"),
   anchorType: z
-    .enum(["product", "character", "scene", "style"])
+    .enum(["product", "product_detail", "character", "scene", "style"])
     .optional()
     .default("product")
     .describe(
-      "role=canon 的锚点类型：product 产品主体（必需）、character 角色、scene 场景、style 主视觉/色调；没有人物就不要生成 character",
+      "role=canon 的锚点类型：product 产品主体（必需）、product_detail 开盖/螺纹/内胆/工艺细节（必须有对应实拍）、character 角色、scene 场景、style 主视觉；没有人物就不要生成 character",
     ),
   role: z
     .enum(["free", "canon", "keyframe", "end_frame"])
@@ -359,6 +359,7 @@ export async function planImageReferences(
     storyboardId?: string;
     anchorType?: AnchorType;
     inputImages?: string[];
+    prompt?: string;
   },
 ): Promise<ImageReferencePlan> {
   const role: ImageRole = input.role ?? (input.shotId ? "keyframe" : "free");
@@ -386,7 +387,10 @@ export async function planImageReferences(
         },
       };
     }
-    if (anchorType === "product" && explicit.length === 0) {
+    if (
+      (anchorType === "product" || anchorType === "product_detail") &&
+      explicit.length === 0
+    ) {
       return {
         role,
         references: [],
@@ -394,9 +398,17 @@ export async function planImageReferences(
         anchorType,
         error: {
           error:
-            "产品锚图必须基于真实产品实拍，不能纯文生图。请上传产品正面/侧面/背面/俯视图，我再生成设定图；否则后续每张关键帧都会变成不同产品。",
-          code: "canon_photo_required",
-          next: "请用户上传产品实拍图 → generate_image(role=canon, anchorType=product, inputImages=[实拍图])",
+            anchorType === "product_detail"
+              ? "产品细节锚图必须基于真实细节实拍（开盖/螺纹/内胆/工艺），不能纯文生图。先上传对应细节图。"
+              : "产品锚图必须基于真实产品实拍，不能纯文生图。请上传产品正面/侧面/背面/俯视图，我再生成设定图；否则后续每张关键帧都会变成不同产品。",
+          code:
+            anchorType === "product_detail"
+              ? "detail_photo_required"
+              : "canon_photo_required",
+          next:
+            anchorType === "product_detail"
+              ? "上传开盖/细节实拍 → generate_image(role=canon, anchorType=product_detail, inputImages=[实拍图])"
+              : "请用户上传产品实拍图 → generate_image(role=canon, anchorType=product, inputImages=[实拍图])",
         },
       };
     }
@@ -463,6 +475,7 @@ export async function planImageReferences(
   const assets = await getAssetsRepository();
   const anchorIds = [
     board.canonAssetId,
+    board.productDetailAnchorAssetId,
     board.characterAnchorAssetId,
     board.sceneAnchorAssetId,
     board.styleAnchorAssetId,
@@ -506,13 +519,54 @@ export async function planImageReferences(
     };
   }
 
+  const stateText = [
+    found.shot.title,
+    found.shot.description,
+    found.shot.prompt,
+    input.prompt,
+  ].join(" ");
+  const needsProductDetail = /开盖|打开|拧开|螺纹|内胆|杯口内部|盖内|倒水|出水/.test(
+    stateText,
+  );
+  if (
+    (role === "keyframe" || role === "end_frame") &&
+    needsProductDetail &&
+    !board.productDetailAnchorAssetId
+  ) {
+    return {
+      role,
+      references: explicit,
+      sourceAssetIds: [],
+      shotId: input.shotId,
+      error: {
+        error:
+          "这一镜涉及开盖/螺纹/内胆/倒水等状态，但分镜没有产品细节锚图。闭盖实拍推不出内部结构，模型会自己发明杯身比例和螺纹。先上传对应细节实拍并生成 product_detail 锚图。",
+        code: "product_state_reference_required",
+        next: "上传开盖/内壁/螺纹实拍 → generate_image(role=canon, anchorType=product_detail, storyboardId, inputImages=[实拍]) → 再生成 keyframe",
+      },
+    };
+  }
+
   const detail = await repo.get(context.projectId, board.id);
   const ordered = detail ? activeShots(detail) : [];
   const index = ordered.findIndex((shot) => shot.id === input.shotId);
   const previous = index > 0 ? ordered[index - 1] : undefined;
 
   const sourceAssetIds = validAnchors.map((asset) => asset.id);
+  const currentRefs: string[] = [];
   const continuityRefs: string[] = [];
+
+  // 重做同一镜首帧时，以当前已确认首帧为主参考：只改机位/动作，不要重新发明产品
+  if (role === "keyframe") {
+    const currentId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
+    if (currentId) {
+      const current = await assets.get(context.projectId, currentId);
+      if (current?.kind === "image") {
+        currentRefs.push((await fileDataUrlFromUrl(current.url)) ?? current.url);
+        sourceAssetIds.push(current.id);
+      }
+    }
+  }
 
   if (role === "keyframe" && previous) {
     // 多镜头必须按镜序闭环：上一镜先出片、抽末帧，再出这一镜首帧
@@ -572,9 +626,12 @@ export async function planImageReferences(
   }
 
   const primaryAnchorIds = new Set(
-    [board.canonAssetId, board.styleAnchorAssetId].filter((id): id is string => Boolean(id)),
+    [board.canonAssetId, board.productDetailAnchorAssetId, board.styleAnchorAssetId].filter(
+      (id): id is string => Boolean(id),
+    ),
   );
   const references = dedupe([
+    ...currentRefs,
     ...(await Promise.all(
       validAnchors
         .filter((asset) => primaryAnchorIds.has(asset.id))
@@ -583,7 +640,7 @@ export async function planImageReferences(
     )),
     ...continuityRefs,
     ...explicit,
-  ]).slice(0, 3);
+  ]).slice(0, 4);
 
   const shotDirection = [
     found.shot.sceneGoal ? `镜头职责：${found.shot.sceneGoal}` : "",
@@ -810,6 +867,7 @@ export function createAgentTools(context: ToolContext) {
         const plan = await planImageReferences(context, {
           role: input.role,
           anchorType: input.anchorType,
+          prompt: input.prompt,
           ...(input.shotId ? { shotId: input.shotId } : {}),
           ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
           ...(input.inputImages ? { inputImages: input.inputImages } : {}),
@@ -962,7 +1020,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_image",
         description:
-          "生成一张图片。视频前期：role=canon+anchorType=product 必须传用户产品实拍图（不能纯文生图）；关键帧 role=keyframe/end_frame 会自动引用产品锚 + 主视觉锚 + 衔接帧，并追加身份锁定。普通画图不传 role。",
+          "生成一张图片。视频前期：role=canon+anchorType=product 必须传用户产品实拍图；product_detail 用于开盖/螺纹/内胆等状态，也必须传对应实拍。关键帧 role=keyframe/end_frame 会自动引用产品锚/细节锚/衔接帧，并追加身份锁定。普通画图不传 role。",
         schema: imageSchema,
       },
     ),
@@ -1317,6 +1375,12 @@ export function createAgentTools(context: ToolContext) {
               active: detail.storyboard.active,
               ...(detail.storyboard.canonAssetId
                 ? { product_anchor_asset_id: detail.storyboard.canonAssetId }
+                : {}),
+              ...(detail.storyboard.productDetailAnchorAssetId
+                ? {
+                    product_detail_anchor_asset_id:
+                      detail.storyboard.productDetailAnchorAssetId,
+                  }
                 : {}),
               ...(detail.storyboard.characterAnchorAssetId
                 ? { character_anchor_asset_id: detail.storyboard.characterAnchorAssetId }

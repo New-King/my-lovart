@@ -51,6 +51,10 @@ export function buildProjectStateContext(
         board.aspectRatio ? ` aspect="${escapeXml(board.aspectRatio)}"` : ""
       }${board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""}${
         board.canonAssetId ? ` product_anchor_id="${escapeXml(board.canonAssetId)}"` : ""
+      }${
+        board.productDetailAnchorAssetId
+          ? ` product_detail_anchor_id="${escapeXml(board.productDetailAnchorAssetId)}"`
+          : ""
       }${board.characterAnchorAssetId ? ` character_anchor_id="${escapeXml(board.characterAnchorAssetId)}"` : ""}${
         board.sceneAnchorAssetId ? ` scene_anchor_id="${escapeXml(board.sceneAnchorAssetId)}"` : ""
       }${board.styleAnchorAssetId ? ` style_anchor_id="${escapeXml(board.styleAnchorAssetId)}"` : ""}/>`,
@@ -84,7 +88,10 @@ export function buildProjectStateContext(
       `  <storyboard id="${escapeXml(board.id)}" title="${escapeXml(clip(board.title, 60))}" kind="${board.kind}" aspect="${escapeXml(board.aspectRatio ?? "")}" status="${board.status}" active="${board.active}" shots="${shots.length}"${
         board.totalDurationSeconds ? ` duration="${board.totalDurationSeconds}"` : ""
       }${board.canonAssetId ? ` product_anchor_id="${escapeXml(board.canonAssetId)}"` : ""}${
-        board.characterAnchorAssetId
+        board.productDetailAnchorAssetId
+          ? ` product_detail_anchor_id="${escapeXml(board.productDetailAnchorAssetId)}"`
+          : ""
+      }${board.characterAnchorAssetId
           ? ` character_anchor_id="${escapeXml(board.characterAnchorAssetId)}"`
           : ""
       }${board.sceneAnchorAssetId ? ` scene_anchor_id="${escapeXml(board.sceneAnchorAssetId)}"` : ""}${

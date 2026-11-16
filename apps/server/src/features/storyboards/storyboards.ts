@@ -15,6 +15,8 @@ export type Storyboard = {
   style?: string;
   /** 产品锚图（原 canon）：整条片子的产品身份基准 */
   canonAssetId?: string | null;
+  /** 开盖/螺纹/内胆/工艺等状态细节；没有它不能生成这些状态的关键帧 */
+  productDetailAnchorAssetId?: string | null;
   characterAnchorAssetId?: string | null;
   sceneAnchorAssetId?: string | null;
   styleAnchorAssetId?: string | null;

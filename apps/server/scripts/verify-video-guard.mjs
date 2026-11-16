@@ -71,6 +71,16 @@ try {
     noPhoto.error?.code ?? "allowed",
   );
 
+  const noDetailPhoto = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "canon",
+    anchorType: "product_detail",
+  });
+  check(
+    "没有细节实拍时拒绝纯文生图细节锚图",
+    noDetailPhoto.error?.code === "detail_photo_required",
+    noDetailPhoto.error?.code ?? "allowed",
+  );
+
   // 2) 5 秒拆 4 个镜头应被拒绝（每段至少 4 秒）
   let tooMany = "";
   try {
@@ -189,6 +199,47 @@ try {
     `refs=${keyframePlan.references.length}`,
   );
 
+  const openState = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot.id,
+    prompt: "低机位仰拍，开盖，螺纹口和杯内壁清晰可见",
+  });
+  check(
+    "开盖/内部状态缺细节锚图时拒绝关键帧",
+    openState.error?.code === "product_state_reference_required",
+    openState.error?.code ?? "allowed",
+  );
+
+  const detailId = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: detailId,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "保温杯 开盖细节锚图",
+    prompt: "开盖后的螺纹口和内壁细节",
+    url: "http://127.0.0.1:3001/files/verify-detail-anchor",
+    mimeType: "image/png",
+    width: 1024,
+    height: 1024,
+    sourceAssetIds: [],
+    metadata: { role: "canon", anchorType: "product_detail" },
+    createdAt: hourAgo,
+  });
+  await repo.setAnchorAsset(projectId, board.storyboard.id, "product_detail", detailId);
+  const withDetail = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot.id,
+    prompt: "低机位仰拍，开盖，螺纹口和杯内壁清晰可见",
+  });
+  check(
+    "有细节锚图后开盖关键帧放行",
+    !withDetail.error &&
+      withDetail.references.includes("http://127.0.0.1:3001/files/verify-detail-anchor") &&
+      withDetail.sourceAssetIds.includes(detailId),
+    withDetail.error?.code ?? `refs=${withDetail.references.length}`,
+  );
+
   const noKeyframe = await checkVideoPreflight(
     baseContext(new Date().toISOString()),
     shot.id,
@@ -251,6 +302,17 @@ try {
     createdAt: tenMinutesAgo,
   });
   await repo.applyFirstFrame(projectId, shot.id, assetId);
+
+  const currentPlan = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot.id,
+  });
+  check(
+    "重做同一镜首帧时以当前首帧为主参考",
+    currentPlan.references[0] === "http://127.0.0.1:3001/files/verify-keyframe" &&
+      currentPlan.sourceAssetIds.includes(assetId),
+    `refs=${currentPlan.references.length}`,
+  );
 
   const allowed = await checkVideoPreflight(
     baseContext(new Date().toISOString()),

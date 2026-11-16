@@ -37,11 +37,12 @@
 
 | G30 视频前期闸门 | 通过（6/6，脚本验收） | 无 shotId、本轮新建镜头、缺首帧、本轮新首帧均被拦；上轮脚本+首帧放行；`direct=true` 显式跳过。不调用视频服务（`docs/notes/M22.md`） |
 
-| G31 视频前期一致性 | 通过（20/20，脚本验收） | 锚图组 + 关键帧血缘 + 5 秒 1 镜头/10 秒最多 2 镜头；无产品锚/无血缘首帧/5 秒 4 镜头均被拒（`docs/notes/M23.md`） |
-| G32 多镜头连贯性 | 通过（20/20，脚本验收） | 首镜缺尾帧拒绝；上一镜没视频 `previous_video_required`；下一镜首帧自动引用上一镜实际末帧；没承接末帧 `continuity_not_anchored`；两镜末帧接通后放行（`docs/notes/M24.md`） |
+| G31 视频前期一致性 | 通过（24/24，脚本验收） | 锚图组 + 关键帧血缘 + 5 秒 1 镜头/10 秒最多 2 镜头；无产品锚/无血缘首帧/5 秒 4 镜头均被拒（`docs/notes/M23.md`） |
+| G32 多镜头连贯性 | 通过（24/24，脚本验收） | 首镜缺尾帧拒绝；上一镜没视频 `previous_video_required`；下一镜首帧自动引用上一镜实际末帧；没承接末帧 `continuity_not_anchored`；两镜末帧接通后放行（`docs/notes/M24.md`） |
 | G33 实拍锚定与末帧抽取 | 通过（20/20 + frame 验收） | 无产品实拍 `canon_photo_required`；本轮新锚图 `canon_unconfirmed`；视频末帧用 ffmpeg 实抽，降级不失败 job（`docs/notes/M25.md`） |
 
 | G34 真实保温杯前期验证 | 部分通过 | 闭盖 v1 锚图/首尾帧同一产品；开盖 v2 杯身变宽、螺纹口被发明，身份不合格。顺带修复本地 `/files` URL 传给 provider 导致 400（`docs/notes/M26.md`） |
+| G35 开盖状态门槛 | 通过（24/24） | 无细节实拍 `detail_photo_required`；开盖关键帧缺细节锚 `product_state_reference_required`；重做首帧以当前首帧为主参考（`docs/notes/M27.md`） |
 
 ## 当前失败/缺口
 

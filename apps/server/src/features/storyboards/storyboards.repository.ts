@@ -82,7 +82,7 @@ export type StoryboardsRepository = {
   setAnchorAsset(
     projectId: string,
     storyboardId: string,
-    anchorType: "product" | "character" | "scene" | "style",
+    anchorType: "product" | "product_detail" | "character" | "scene" | "style",
     assetId: string | null,
   ): Promise<Storyboard>;
   /** 生成作业完成后由 worker 调用；幂等 */
@@ -106,6 +106,7 @@ type BoardRow = {
   aspect_ratio: string | null;
   style: string | null;
   canon_asset_id: string | null;
+  product_detail_anchor_asset_id: string | null;
   character_anchor_asset_id: string | null;
   scene_anchor_asset_id: string | null;
   style_anchor_asset_id: string | null;
@@ -143,7 +144,7 @@ type ShotRow = {
 };
 
 const BOARD_COLUMNS =
-  "id, project_id, title, brief, kind, aspect_ratio, style, canon_asset_id, character_anchor_asset_id, scene_anchor_asset_id, style_anchor_asset_id, total_duration_seconds, status, active, metadata, created_at, updated_at";
+  "id, project_id, title, brief, kind, aspect_ratio, style, canon_asset_id, product_detail_anchor_asset_id, character_anchor_asset_id, scene_anchor_asset_id, style_anchor_asset_id, total_duration_seconds, status, active, metadata, created_at, updated_at";
 const SHOT_COLUMNS =
   "id, storyboard_id, order_index, title, description, prompt, duration_seconds, camera, transition, scene_goal, continuity_note, negative_prompt, active_asset_id, first_frame_asset_id, end_frame_asset_id, video_asset_id, video_last_frame_asset_id, status, metadata, deleted_at, created_at, updated_at";
 
@@ -163,6 +164,9 @@ function toBoard(row: BoardRow): Storyboard {
     ...(row.aspect_ratio ? { aspectRatio: row.aspect_ratio } : {}),
     ...(row.style ? { style: row.style } : {}),
     ...(row.canon_asset_id ? { canonAssetId: row.canon_asset_id } : {}),
+    ...(row.product_detail_anchor_asset_id
+      ? { productDetailAnchorAssetId: row.product_detail_anchor_asset_id }
+      : {}),
     ...(row.character_anchor_asset_id
       ? { characterAnchorAssetId: row.character_anchor_asset_id }
       : {}),
@@ -628,6 +632,8 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
           aspect_ratio: snapshot.storyboard.aspectRatio ?? null,
           style: snapshot.storyboard.style ?? null,
           canon_asset_id: snapshot.storyboard.canonAssetId ?? null,
+          product_detail_anchor_asset_id:
+            snapshot.storyboard.productDetailAnchorAssetId ?? null,
           character_anchor_asset_id: snapshot.storyboard.characterAnchorAssetId ?? null,
           scene_anchor_asset_id: snapshot.storyboard.sceneAnchorAssetId ?? null,
           style_anchor_asset_id: snapshot.storyboard.styleAnchorAssetId ?? null,
@@ -751,7 +757,9 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
       const column =
         anchorType === "product"
           ? "canon_asset_id"
-          : anchorType === "character"
+          : anchorType === "product_detail"
+            ? "product_detail_anchor_asset_id"
+            : anchorType === "character"
             ? "character_anchor_asset_id"
             : anchorType === "scene"
               ? "scene_anchor_asset_id"
@@ -1103,7 +1111,9 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       const key =
         anchorType === "product"
           ? "canonAssetId"
-          : anchorType === "character"
+          : anchorType === "product_detail"
+            ? "productDetailAnchorAssetId"
+            : anchorType === "character"
             ? "characterAnchorAssetId"
             : anchorType === "scene"
               ? "sceneAnchorAssetId"
