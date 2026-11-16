@@ -48,6 +48,8 @@ export type StoryboardShot = {
   firstFrameAssetId?: string;
   endFrameAssetId?: string;
   videoAssetId?: string;
+  /** 视频实际最后一帧；下一镜承接它，而不是另一张生成的尾帧 */
+  videoLastFrameAssetId?: string;
   status: ShotStatus;
   metadata: Record<string, unknown>;
   deletedAt?: string;

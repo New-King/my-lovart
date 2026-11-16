@@ -1,6 +1,6 @@
 # 项目状态、产物账本与分镜 · 设计
 
-> 状态：Phase 1c / 1d / 2.5 / 3a / 3b 已实现（分镜 UI 待做）
+> 状态：Phase 1c / 1d / 2.5 / 3a / 3b / 3c 已实现（分镜 UI 待做）
 > 最后更新：2026-11-15
 > 关联：`ROADMAP.md`、`docs/specs/golden-scenarios.md`、`docs/specs/video-preproduction.md`、`docs/notes/M15.md`、`docs/notes/M16.md`
 
@@ -132,6 +132,7 @@ create table storyboard_shots (
   first_frame_asset_id uuid references project_assets(id) on delete set null,
   end_frame_asset_id uuid references project_assets(id) on delete set null,
   video_asset_id uuid references project_assets(id) on delete set null,
+  video_last_frame_asset_id uuid references project_assets(id) on delete set null,
   status text not null default 'draft',  -- draft/generating/ready/failed
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -237,7 +238,7 @@ create table storyboard_revisions (
 2. **Phase 1d 执行记忆**：PostgresSaver + `thread_id`、上下文预算与工具消息裁剪。对齐 Lavart 并超过它。
 3. **Phase 2.5 分镜（已完成，见 M21）**：migration `0009`（storyboards/shots/revisions）、分镜工具、`<project_state>` 注入；生成工具支持 `shotId` 并自动成为镜头当前版本。
 4. **视频前期闸门（已完成，见 M22）**：`generate_video` 要求上一轮已确认的镜头脚本 + 首帧关键图；本轮新建/新图也拦下，只有明确要求跳过才放行。
-5. **Phase 3a/3b 锚图与连贯性（已完成，见 M23/M24）**：产品/角色/场景/主视觉锚图组、每镜首尾帧、上一镜尾帧自动承接下一镜；详见 `docs/specs/video-preproduction.md`。
+5. **Phase 3a/3b/3c 锚图与连贯性（已完成，见 M23/M24/M25）**：产品实拍锚定、锚图组、每镜首尾帧、上一镜实际末帧自动承接下一镜；详见 `docs/specs/video-preproduction.md`。
 6. **Phase 3 工具深度**：画布 add_text/shape/line/update_style，和分镜镜头联动。
 
 ## 8. 验收场景

@@ -12,6 +12,7 @@
     "verify:attachments": "pnpm build && node --env-file=../../.env.local ./scripts/verify-attachments.mjs",
     "verify:assets": "pnpm build && node --env-file=../../.env.local ./scripts/verify-assets.mjs",
     "verify:video-guard": "pnpm build && node --env-file=../../.env.local ./scripts/verify-video-guard.mjs",
+    "verify:video-frame": "pnpm build && node --env-file=../../.env.local ./scripts/verify-video-frame.mjs",
     "trace:latest": "node ./scripts/trace-latest.mjs"
   },
   "dependencies": {

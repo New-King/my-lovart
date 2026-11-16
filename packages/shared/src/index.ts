@@ -57,7 +57,7 @@ export type ToolBlock = {
 };
 
 /** 图片在视频前期里的角色；canon 是产品/角色设定图，后续关键帧都必须引用它 */
-export type AssetRole = "free" | "canon" | "keyframe" | "end_frame";
+export type AssetRole = "free" | "canon" | "keyframe" | "end_frame" | "video_last_frame";
 /** 设定图锚点类型；product 是主产品，其余按需生成 */
 export type AnchorType = "product" | "character" | "scene" | "style";
 

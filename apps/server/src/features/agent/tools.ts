@@ -9,8 +9,13 @@ import type {
 } from "@my-lovart/shared";
 import { z } from "zod";
 import type { ProjectAsset } from "../assets/assets.js";
-import { fileDataUrlFromUrl, importRemoteFile } from "../files/file.store.js";
+import {
+  fileDataUrlFromUrl,
+  importFileBuffer,
+  importRemoteFile,
+} from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
+import { extractVideoLastFrame } from "../generation/video-frame.js";
 import { GenerationError, isAbortError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
 import { createJob, cancelJob, jobsEnabled, waitForJob } from "../jobs/jobs.js";
@@ -381,6 +386,20 @@ export async function planImageReferences(
         },
       };
     }
+    if (anchorType === "product" && explicit.length === 0) {
+      return {
+        role,
+        references: [],
+        sourceAssetIds: [],
+        anchorType,
+        error: {
+          error:
+            "产品锚图必须基于真实产品实拍，不能纯文生图。请上传产品正面/侧面/背面/俯视图，我再生成设定图；否则后续每张关键帧都会变成不同产品。",
+          code: "canon_photo_required",
+          next: "请用户上传产品实拍图 → generate_image(role=canon, anchorType=product, inputImages=[实拍图])",
+        },
+      };
+    }
     if (input.storyboardId) {
       const repo = await getStoryboardsRepository();
       const board = await repo.get(context.projectId, input.storyboardId);
@@ -466,6 +485,26 @@ export async function planImageReferences(
       },
     };
   }
+  const canon = validAnchors.find((asset) => asset.id === board.canonAssetId);
+  const canonCreatedAt = canon ? new Date(canon.createdAt).getTime() : Number.NaN;
+  if (
+    canon &&
+    Number.isFinite(canonCreatedAt) &&
+    canonCreatedAt >= new Date(context.runStartedAt).getTime() - 2000
+  ) {
+    return {
+      role,
+      references: explicit,
+      sourceAssetIds: [],
+      shotId: input.shotId,
+      error: {
+        error:
+          "产品锚图是本轮刚生成的，用户还没确认“是不是这只产品”。先把锚图给用户看，下一轮确认后再出关键帧。",
+        code: "canon_unconfirmed",
+        canon_asset_id: canon.id,
+      },
+    };
+  }
 
   const detail = await repo.get(context.projectId, board.id);
   const ordered = detail ? activeShots(detail) : [];
@@ -476,23 +515,38 @@ export async function planImageReferences(
   const continuityRefs: string[] = [];
 
   if (role === "keyframe" && previous) {
-    if (!previous.endFrameAssetId) {
+    // 多镜头必须按镜序闭环：上一镜先出片、抽末帧，再出这一镜首帧
+    if (!previous.videoAssetId) {
       return {
         role,
         references: explicit,
         sourceAssetIds,
         shotId: input.shotId,
         error: {
-          error: `上一镜「${previous.title}」还没有尾帧，接不上。先生成上一镜的 end_frame，再出这一镜首帧。`,
-          code: "previous_end_frame_required",
+          error: `上一镜「${previous.title}」还没有视频。多镜头要先把上一镜出片并抽末帧，再生成这一镜首帧，否则只能靠生成的尾帧近似。`,
+          code: "previous_video_required",
           previous_shot_id: previous.id,
         },
       };
     }
-    const previousEnd = await assets.get(context.projectId, previous.endFrameAssetId);
-    if (previousEnd?.kind === "image") {
-      continuityRefs.push(previousEnd.url);
-      sourceAssetIds.push(previousEnd.id);
+    const continuityId = previous.videoLastFrameAssetId ?? previous.endFrameAssetId;
+    if (!continuityId) {
+      return {
+        role,
+        references: explicit,
+        sourceAssetIds,
+        shotId: input.shotId,
+        error: {
+          error: `上一镜「${previous.title}」既没有抽到实际末帧，也没有尾帧图，无法衔接。`,
+          code: "previous_continuity_missing",
+          previous_shot_id: previous.id,
+        },
+      };
+    }
+    const continuity = await assets.get(context.projectId, continuityId);
+    if (continuity?.kind === "image") {
+      continuityRefs.push(continuity.url);
+      sourceAssetIds.push(continuity.id);
     }
   }
 
@@ -517,13 +571,17 @@ export async function planImageReferences(
     }
   }
 
+  const primaryAnchorIds = new Set(
+    [board.canonAssetId, board.styleAnchorAssetId].filter((id): id is string => Boolean(id)),
+  );
   const references = dedupe([
     ...validAnchors
-      .slice(0, role === "keyframe" && !previous ? 4 : 3)
+      .filter((asset) => primaryAnchorIds.has(asset.id))
+      .slice(0, 2)
       .map((asset) => asset.url),
     ...continuityRefs,
     ...explicit,
-  ]).slice(0, 4);
+  ]).slice(0, 3);
 
   const shotDirection = [
     found.shot.sceneGoal ? `镜头职责：${found.shot.sceneGoal}` : "",
@@ -548,6 +606,7 @@ async function attachVideoToShot(
   projectId: string,
   shotId: string | undefined,
   artifact: VideoBlock,
+  baseUrl: string,
 ): Promise<void> {
   if (!shotId) return;
   try {
@@ -571,6 +630,34 @@ async function attachVideoToShot(
     });
     const repo = await getStoryboardsRepository();
     await repo.applyVideo(projectId, shotId, artifact.id);
+
+    const frame = await extractVideoLastFrame(artifact.url);
+    if (frame) {
+      const storedFrame = await importFileBuffer(
+        frame,
+        "image/jpeg",
+        `${artifact.title ?? "视频"} 末帧`,
+        baseUrl,
+      );
+      const frameAssetId = randomUUID();
+      await (await getAssetsRepository()).save(projectId, {
+        id: frameAssetId,
+        projectId,
+        kind: "image",
+        origin: "derived",
+        title: `${artifact.title ?? "视频"} 末帧`,
+        prompt: `视频实际最后一帧：${artifact.title ?? artifact.prompt ?? ""}`,
+        url: storedFrame.url,
+        mimeType: "image/jpeg",
+        width: artifact.width,
+        height: artifact.height,
+        sourceAssetIds: [artifact.id],
+        shotId,
+        metadata: { role: "video_last_frame", videoAssetId: artifact.id },
+        createdAt: new Date().toISOString(),
+      });
+      await repo.applyVideoLastFrame(projectId, shotId, frameAssetId);
+    }
   } catch (err) {
     console.warn(
       "[storyboards] 视频挂镜头失败：",
@@ -651,20 +738,27 @@ export async function checkVideoPreflight(
     const lastIndex = ordered.length - 1;
 
     if (previous) {
-      if (!previous.endFrameAssetId) {
+      if (!previous.videoAssetId) {
         return {
-          error: `上一镜「${previous.title}」还没有尾帧，接不上。先生成上一镜的 end_frame，再生成这一镜。`,
-          code: "continuity_required",
+          error: `上一镜「${previous.title}」还没有视频。多镜头要按顺序先出上一镜，再出这一镜。`,
+          code: "previous_video_required",
+          previous_shot_id: previous.id,
+        };
+      }
+      const continuityId = previous.videoLastFrameAssetId ?? previous.endFrameAssetId;
+      if (!continuityId) {
+        return {
+          error: `上一镜「${previous.title}」没有可用的衔接帧（视频末帧和尾帧都缺）。`,
+          code: "previous_continuity_missing",
           previous_shot_id: previous.id,
         };
       }
       const anchored =
-        firstFrameId === previous.endFrameAssetId ||
-        keyframe.sourceAssetIds.includes(previous.endFrameAssetId);
+        firstFrameId === continuityId || keyframe.sourceAssetIds.includes(continuityId);
       if (!anchored) {
         return {
           error:
-            "这一镜首帧没有承接上一镜尾帧，剪辑点会跳。重新用 generate_image(shotId, role=keyframe) 出首帧，服务端会自动把上一镜尾帧作为参考。",
+            "这一镜首帧没有承接上一镜的实际末帧，剪辑点会跳。重新用 generate_image(shotId, role=keyframe) 出首帧，服务端会自动把上一镜末帧作为参考。",
           code: "continuity_not_anchored",
           previous_shot_id: previous.id,
         };
@@ -722,9 +816,13 @@ export function createAgentTools(context: ToolContext) {
         const referenceImages = plan.references;
         const role = plan.role;
         const sourceAssetIds = plan.sourceAssetIds;
-        const prompt = plan.shotDirection
-          ? `${input.prompt}\n\n${plan.shotDirection}`
-          : input.prompt;
+        const identityLock =
+          role === "keyframe" || role === "end_frame"
+            ? "严格保持参考图主体的身份一致：形状、比例、接口/瓶盖结构、材质、颜色、标志位置，不要重新设计主体；只允许改变机位、光线、背景与构图。"
+            : "";
+        const prompt = [input.prompt, identityLock, plan.shotDirection]
+          .filter(Boolean)
+          .join("\n\n");
 
         if (jobsEnabled()) {
           try {
@@ -862,7 +960,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_image",
         description:
-          "生成一张图片。视频前期：role=canon 先做锚图组（product 必需，character/scene/style 按需）；role=keyframe/end_frame 生成镜头首尾帧，服务端自动引用锚图、上一镜尾帧和当前首帧。普通画图不传 role。",
+          "生成一张图片。视频前期：role=canon+anchorType=product 必须传用户产品实拍图（不能纯文生图）；关键帧 role=keyframe/end_frame 会自动引用产品锚 + 主视觉锚 + 衔接帧，并追加身份锁定。普通画图不传 role。",
         schema: imageSchema,
       },
     ),
@@ -968,11 +1066,6 @@ export function createAgentTools(context: ToolContext) {
                 artifact?: VideoBlock;
               };
               if (result?.artifact) {
-                await attachVideoToShot(
-                  context.projectId,
-                  input.shotId,
-                  result.artifact,
-                );
                 return JSON.stringify({
                   summary: `已生成视频「${result.artifact.title ?? input.title}」。`,
                   artifact: result.artifact,
@@ -1040,7 +1133,7 @@ export function createAgentTools(context: ToolContext) {
             ...(input.shotId ? { shotId: input.shotId } : {}),
           };
 
-          await attachVideoToShot(context.projectId, input.shotId, artifact);
+          await attachVideoToShot(context.projectId, input.shotId, artifact, context.baseUrl);
 
           return JSON.stringify({
             summary: `已生成视频「${input.title}」，${result.durationSeconds} 秒。`,
@@ -1259,6 +1352,9 @@ export function createAgentTools(context: ToolContext) {
                 : {}),
               ...(shot.endFrameAssetId ? { end_frame_asset_id: shot.endFrameAssetId } : {}),
               ...(shot.videoAssetId ? { video_asset_id: shot.videoAssetId } : {}),
+              ...(shot.videoLastFrameAssetId
+                ? { video_last_frame_asset_id: shot.videoLastFrameAssetId }
+                : {}),
               versions: (byShot.get(shot.id) ?? []).slice(0, 8).map((asset) => ({
                 asset_id: asset.id,
                 kind: asset.kind,
@@ -1269,7 +1365,8 @@ export function createAgentTools(context: ToolContext) {
                   asset.id === shot.activeAssetId ||
                   asset.id === shot.firstFrameAssetId ||
                   asset.id === shot.endFrameAssetId ||
-                  asset.id === shot.videoAssetId,
+                  asset.id === shot.videoAssetId ||
+                  asset.id === shot.videoLastFrameAssetId,
               })),
             })),
             revisions: revisions.map((revision) => ({

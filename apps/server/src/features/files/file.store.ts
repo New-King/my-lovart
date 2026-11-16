@@ -94,6 +94,21 @@ export async function normalizeAttachment(
   };
 }
 
+/** 服务端自己产出的文件（如视频抽帧）：直接落内存 + Storage，返回 /files/:id */
+export async function importFileBuffer(
+  data: Buffer,
+  mimeType: string,
+  name: string,
+  baseUrl: string,
+): Promise<{ id: string; url: string; size: number }> {
+  if (data.byteLength === 0) throw new Error("文件为空");
+  if (data.byteLength > MAX_IMPORT_BYTES) throw new Error("文件超过 64MB");
+  const id = randomUUID();
+  files.set(id, { id, name, mimeType, data });
+  await uploadStoredFile(`attachments/${id}`, data, mimeType);
+  return { id, url: `${baseUrl}${FILE_ROUTE_PREFIX}${id}`, size: data.byteLength };
+}
+
 export async function getFile(id: string): Promise<StoredFile | undefined> {
   const cached = files.get(id);
   if (cached) return cached;

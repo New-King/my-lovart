@@ -1,8 +1,8 @@
 # 视频前期：锚图组、关键帧、镜头时长与连贯性
 
-> 状态：Phase 3a/3b 已实现（多镜头拼接未实现）
-> 最后更新：2026-11-15
-> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/specs/project-state-and-storyboard.md`
+> 状态：Phase 3a/3b/3c 已实现（多镜头拼接未实现）
+> 最后更新：2026-11-16
+> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/notes/M25.md`、`docs/specs/project-state-and-storyboard.md`
 
 ## 问题
 
@@ -32,24 +32,24 @@
 
 | 层 | 角色 | 数量 | 是否进视频 | 生成方式 |
 | --- | --- | --- | --- | --- |
-| 锚图组 | `canon` + `anchorType=product/character/scene/style` | 产品 1 张必需；其余按 brief 动态 0-3 张 | 否，只做参考 | 用户实拍图做参考或文生图；确认后锁定 |
+| 锚图组 | `canon` + `anchorType=product/character/scene/style` | 产品 1 张必需；其余按 brief 动态 0-3 张 | 否，只做参考 | 产品锚必须基于用户实拍图；其余可文生图；确认后锁定 |
 | 分镜首尾帧 | `keyframe` / `end_frame` | 每镜 1 张首帧；多镜头除收尾外必须有尾帧 | 首帧作为视频第一帧，尾帧作为最后一帧 | 自动引用锚图组 + 上一镜尾帧（首帧）或当前首帧（尾帧） |
 | 成片片段 | `video` | 每镜 1 条 | 最终交付 | `generate_video(shotId)`，首尾帧和时长由镜头锁定 |
 
-`planImageReferences` 在生成关键帧时自动按 product → character → scene → style 顺序收集锚图 URL，并叠加上一镜尾帧；生成结果记录 `metadata.role` 与 `sourceAssetIds`。出片预检会校验首帧必须含产品锚图血缘、含上一镜尾帧（多镜头），手工塞图会被拒绝。
+`planImageReferences` 在生成关键帧时默认只带产品锚 + 主视觉锚 + 衔接帧（最多 3 张），scene/character 不再默认稀释产品主体；生成结果记录 `metadata.role` 与 `sourceAssetIds`。出片预检会校验首帧必须含产品锚图血缘、承接上一镜实际末帧（多镜头），手工塞图会被拒绝。
 
 ## 连贯性方案
 
-静态一致性靠锚图组；段落连贯靠首尾帧链：
+静态一致性靠锚图组；段落连贯靠“实际视频末帧”：
 
-1. 镜头 1 首帧基于锚图组生成；
-2. 镜头 1 尾帧基于锚图组 + 镜头 1 首帧生成；
-3. 镜头 2 首帧自动引用锚图组 + 镜头 1 尾帧；服务端强制 `sourceAssetIds` 包含上一镜尾帧；
-4. 镜头 2 尾帧基于锚图组 + 镜头 2 首帧；
-5. 视频 1 用镜头 1 首/尾帧，视频 2 用镜头 2 首/尾帧；剪辑点两端是同一画面状态；
-6. 非收尾镜头没有尾帧 → `end_frame_required`；下一镜首帧没承接上一镜尾帧 → `continuity_not_anchored`。
+1. 镜头 1 首帧基于产品锚 + 主视觉锚生成；
+2. 镜头 1 尾帧基于锚图 + 镜头 1 首帧生成；
+3. 镜头 1 出片后用 ffmpeg 抽取实际最后一帧，登记 `video_last_frame_asset_id`；
+4. 镜头 2 首帧只承接这个实际末帧（不是再次生成的尾帧图），再生成镜头 2 尾帧；
+5. 镜头 2 出片、抽末帧，继续下一镜；
+6. 非收尾镜头没有尾帧 → `end_frame_required`；上一镜没视频 → `previous_video_required`；首帧没承接实际末帧 → `continuity_not_anchored`。
 
-MiniMax H3 支持首帧/尾帧图生视频，单段 4-15 秒，所以这个链路可以直接落地，不依赖拼接。
+MiniMax H3 支持首帧/尾帧图生视频，单段 4-15 秒。图生视频与多模态参考互斥，所以产品信息必须提前固化到首尾帧。抽帧失败时降级到 `end_frame`，不失败整个 job。
 
 ## 时长与镜头数
 
@@ -62,24 +62,23 @@ MiniMax H3 支持首帧/尾帧图生视频，单段 4-15 秒，所以这个链�
 
 ## 数据模型
 
-migration `0010` / `0011`（已执行）：
+migration `0010` / `0011` / `0012`（已执行）：
 
 - `storyboards.kind`、`canon_asset_id`（产品锚）、`character_anchor_asset_id`、`scene_anchor_asset_id`、`style_anchor_asset_id`、`total_duration_seconds`
-- `storyboard_shots.first_frame_asset_id` / `end_frame_asset_id` / `video_asset_id`
+- `storyboard_shots.first_frame_asset_id` / `end_frame_asset_id` / `video_asset_id` / `video_last_frame_asset_id`
 - `storyboard_shots.scene_goal` / `continuity_note` / `negative_prompt`
 
 旧 `active_asset_id` 只保留兼容；新代码按角色写独立指针。
 
 ## 流程
 
-1. 需求：平台/画幅、总时长、基调；问用户有没有产品实拍图。
+1. 需求：平台/画幅、总时长、基调；产品锚必须要求用户上传正面/侧面/背面/俯视实拍图。
 2. 脚本：按镜头列画面、运镜、节奏、sceneGoal、continuityNote、negativePrompt。
 3. `create_storyboard({kind:"video", totalDurationSeconds, shots})`：只写文字时间线。
-4. 生成锚图组：`generate_image({role:"canon", anchorType:"product", storyboardId, inputImages:[产品图]})`；再按需生成 style/scene/character。
-5. 按镜头顺序生成首尾帧：`generate_image({shotId, role:"keyframe"})` → `generate_image({shotId, role:"end_frame"})`；服务端自动引用锚图与上一镜尾帧。
-6. 给用户看锚图组 + 脚本 + 镜头表 + 首尾帧，停止。
-7. 下一轮确认后逐镜 `generate_video({shotId})`；首尾帧和时长由镜头锁定。
-8. 多镜头全部完成后，才进入拼接成片。
+4. 生成锚图组：`generate_image({role:"canon", anchorType:"product", storyboardId, inputImages:[产品图]})`；本轮给用户确认，不能同轮出关键帧（`canon_unconfirmed`）。
+5. 下一轮按镜序闭环：镜头 1 keyframe + end_frame → 用户确认 → `generate_video(shot1)` → 服务端抽实际末帧。
+6. 镜头 2 keyframe 承接镜头 1 实际末帧 → end_frame → 确认 → 出片 → 抽末帧，依此类推。
+7. 多镜头全部完成后，才进入拼接成片。
 
 ## 仍未实现
 
@@ -89,11 +88,13 @@ migration `0010` / `0011`（已执行）：
 
 ## 验收
 
-`apps/server/scripts/verify-video-guard.mjs`，17/17 通过，不调用图片/视频 provider：
+`apps/server/scripts/verify-video-guard.mjs`，20/20 通过，不调用图片/视频 provider；`verify-video-frame.mjs` 通过（生成 1 秒测试视频并抽末帧）：
 
+- 无产品实拍 → `canon_photo_required`
 - 无 shotId → `video_plan_required`
 - 5 秒拆 4 镜头 / 概念板直接转视频 → 校验拒绝
 - 本轮新建镜头 → `video_plan_unconfirmed`
+- 本轮新锚图未确认 → `canon_unconfirmed`
 - 缺 canon → 关键帧/出片均 `canon_required`
 - 关键帧自动以 canon 为第一参考图
 - 缺首帧 → `keyframe_required`
@@ -101,7 +102,8 @@ migration `0010` / `0011`（已执行）：
 - 已确认 canon + 首帧 → 放行
 - 首帧本轮新出 → `keyframe_unconfirmed`
 - 多镜头首镜缺尾帧 → `end_frame_required`
-- 下一镜自动承接上一镜尾帧
-- 没承接尾帧的首帧 → `continuity_not_anchored`
-- 两镜首尾帧接通 → 放行
+- 上一镜没视频 → `previous_video_required`
+- 下一镜自动承接上一镜实际末帧
+- 没承接实际末帧的首帧 → `continuity_not_anchored`
+- 两镜末帧接通 → 放行
 - `direct=true` 显式跳过

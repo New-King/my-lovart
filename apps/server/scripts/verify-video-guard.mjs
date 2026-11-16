@@ -61,6 +61,16 @@ try {
     noShot.code ?? "no code",
   );
 
+  const noPhoto = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "canon",
+    anchorType: "product",
+  });
+  check(
+    "没有产品实拍时拒绝纯文生图锚图",
+    noPhoto.error?.code === "canon_photo_required",
+    noPhoto.error?.code ?? "allowed",
+  );
+
   // 2) 5 秒拆 4 个镜头应被拒绝（每段至少 4 秒）
   let tooMany = "";
   try {
@@ -308,6 +318,34 @@ try {
   await repo.setAnchorAsset(projectId, board2.storyboard.id, "style", styleId);
   await repo.setAnchorAsset(projectId, board2.storyboard.id, "product", canonId);
 
+  const freshCanonId = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: freshCanonId,
+    projectId,
+    kind: "image",
+    origin: "generated",
+    title: "本轮刚生成的产品锚图",
+    prompt: "还没有给用户确认",
+    url: "http://127.0.0.1:3001/files/verify-fresh-canon",
+    mimeType: "image/png",
+    width: 1024,
+    height: 1024,
+    sourceAssetIds: [],
+    metadata: { role: "canon", anchorType: "product" },
+    createdAt: new Date().toISOString(),
+  });
+  await repo.setAnchorAsset(projectId, board2.storyboard.id, "product", freshCanonId);
+  const freshCanon = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot1.id,
+  });
+  check(
+    "本轮新生成的锚图未确认时不开放关键帧",
+    freshCanon.error?.code === "canon_unconfirmed",
+    freshCanon.error?.code ?? "allowed",
+  );
+  await repo.setAnchorAsset(projectId, board2.storyboard.id, "product", canonId);
+
   const first1 = randomUUID();
   await (await getAssetsRepository()).save(projectId, {
     id: first1,
@@ -357,14 +395,64 @@ try {
   });
   await repo.applyEndFrame(projectId, shot1.id, end1);
 
+  const beforeVideo = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot2.id,
+  });
+  check(
+    "上一镜没视频时不允许出下一镜首帧",
+    beforeVideo.error?.code === "previous_video_required",
+    beforeVideo.error?.code ?? "allowed",
+  );
+
+  // 模拟视频1已生成并抽出实际末帧
+  const video1 = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: video1,
+    projectId,
+    kind: "video",
+    origin: "generated",
+    title: "通勤开场 视频",
+    prompt: "通勤开场",
+    url: "http://127.0.0.1:3001/files/verify-shot1-video.mp4",
+    mimeType: "video/mp4",
+    width: 1280,
+    height: 720,
+    durationSeconds: 5,
+    sourceAssetIds: [first1, end1],
+    shotId: shot1.id,
+    metadata: { role: "video" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyVideo(projectId, shot1.id, video1);
+
+  const last1 = randomUUID();
+  await (await getAssetsRepository()).save(projectId, {
+    id: last1,
+    projectId,
+    kind: "image",
+    origin: "derived",
+    title: "通勤开场 实际末帧",
+    prompt: "视频最后一帧",
+    url: "http://127.0.0.1:3001/files/verify-shot1-last",
+    mimeType: "image/jpeg",
+    width: 1280,
+    height: 720,
+    sourceAssetIds: [video1],
+    shotId: shot1.id,
+    metadata: { role: "video_last_frame" },
+    createdAt: tenMinutesAgo,
+  });
+  await repo.applyVideoLastFrame(projectId, shot1.id, last1);
+
   const shot2Plan = await planImageReferences(baseContext(new Date().toISOString()), {
     role: "keyframe",
     shotId: shot2.id,
   });
   check(
-    "下一镜首帧自动承接上一镜尾帧",
-    shot2Plan.references.includes("http://127.0.0.1:3001/files/verify-shot1-end") &&
-      shot2Plan.sourceAssetIds.includes(end1),
+    "下一镜首帧自动承接上一镜实际末帧",
+    shot2Plan.references.includes("http://127.0.0.1:3001/files/verify-shot1-last") &&
+      shot2Plan.sourceAssetIds.includes(last1),
     `refs=${shot2Plan.references.length}`,
   );
   check(
@@ -400,7 +488,7 @@ try {
     false,
   );
   check(
-    "没承接上一镜尾帧的首帧被拒绝",
+    "没承接上一镜实际末帧的首帧被拒绝",
     loose?.code === "continuity_not_anchored",
     loose?.code ?? "allowed",
   );
@@ -417,7 +505,7 @@ try {
     mimeType: "image/png",
     width: 1280,
     height: 720,
-    sourceAssetIds: [canonId, styleId, end1],
+    sourceAssetIds: [canonId, styleId, last1],
     shotId: shot2.id,
     metadata: { role: "keyframe" },
     createdAt: tenMinutesAgo,
@@ -428,7 +516,7 @@ try {
     shot2.id,
     false,
   );
-  check("两镜首尾帧接通后放行", continuous === null, continuous?.code ?? "allowed");
+  check("两镜末帧接通后放行", continuous === null, continuous?.code ?? "allowed");
 
   // 10) 用户明确要求跳过时才放行
   const direct = await checkVideoPreflight(

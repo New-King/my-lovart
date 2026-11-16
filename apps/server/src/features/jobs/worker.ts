@@ -5,8 +5,9 @@ import { env } from "../../lib/env.js";
 import { getAssetsRepository } from "../assets/assets.repository.js";
 import type { ProjectAsset } from "../assets/assets.js";
 import { insertImageOnCanvas, insertVideoOnCanvas } from "../canvas/server-canvas.js";
-import { importRemoteFile } from "../files/file.store.js";
+import { importFileBuffer, importRemoteFile } from "../files/file.store.js";
 import { generateVideoWithMetaso } from "../generation/metaso-video.js";
+import { extractVideoLastFrame } from "../generation/video-frame.js";
 import { GenerationError } from "../generation/types.js";
 import { generateImageWithVolces } from "../generation/volces-image.js";
 import { getStoryboardsRepository } from "../storyboards/storyboards.repository.js";
@@ -337,7 +338,50 @@ async function executeVideoJob(job: BackgroundJob): Promise<Record<string, unkno
       console.warn("[worker] 视频资产落账本失败：", err instanceof Error ? err.message : err);
     });
 
-  if (shotId) await attachToShot(job.projectId, shotId, artifact.id, "video", "", "");
+  if (shotId) {
+    await attachToShot(job.projectId, shotId, artifact.id, "video", "", "");
+    await reportProgress(job, 96, "抽取视频末帧");
+    try {
+      const frame = await extractVideoLastFrame(artifact.url);
+      if (frame) {
+        const baseUrl = `http://127.0.0.1:${env.port}`;
+        const storedFrame = await importFileBuffer(
+          frame,
+          "image/jpeg",
+          `${title} 末帧`,
+          baseUrl,
+        );
+        const frameAssetId = randomUUID();
+        await (await getAssetsRepository()).save(job.projectId, {
+          id: frameAssetId,
+          projectId: job.projectId,
+          kind: "image",
+          origin: "derived",
+          title: `${title} 末帧`,
+          prompt: `视频实际最后一帧：${title}`,
+          url: storedFrame.url,
+          mimeType: "image/jpeg",
+          width: artifact.width,
+          height: artifact.height,
+          sourceAssetIds: [artifact.id],
+          shotId,
+          metadata: { role: "video_last_frame", videoAssetId: artifact.id },
+          createdAt: new Date().toISOString(),
+        });
+        await (await getStoryboardsRepository()).applyVideoLastFrame(
+          job.projectId,
+          shotId,
+          frameAssetId,
+        );
+      }
+    } catch (err) {
+      // 抽帧失败不拖垮视频作业：下一镜会回退到 end_frame，并记录日志
+      console.warn(
+        "[worker] 视频末帧登记失败，降级到 end_frame：",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   return {
     artifact,

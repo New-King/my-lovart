@@ -72,6 +72,10 @@ export function buildProjectStateContext(
               : ""
         }${shot.endFrameAssetId ? ` end_frame_id="${escapeXml(shot.endFrameAssetId)}"` : ""}${
           shot.videoAssetId ? ` video_id="${escapeXml(shot.videoAssetId)}"` : ""
+        }${
+          shot.videoLastFrameAssetId
+            ? ` video_last_frame_id="${escapeXml(shot.videoLastFrameAssetId)}"`
+            : ""
         }${shot.durationSeconds ? ` duration="${shot.durationSeconds}"` : ""}${
           shot.camera ? ` camera="${escapeXml(clip(shot.camera, 40))}"` : ""
         }${shot.sceneGoal ? ` goal="${escapeXml(clip(shot.sceneGoal, 40))}"` : ""}>${escapeXml(clip(shot.description || shot.prompt))}</shot>`,
