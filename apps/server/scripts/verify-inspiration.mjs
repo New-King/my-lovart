@@ -11,6 +11,7 @@ const { searchPexelsPhotos } = await import(
   "../dist/features/inspiration/pexels.js"
 );
 const { createAgentTools } = await import("../dist/features/agent/tools.js");
+const { env } = await import("../dist/lib/env.js");
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -147,6 +148,15 @@ try {
     "summary 说明“第几组第几张”直接映射到 imageUrl",
     output.summary.includes("第几组第几张") && output.summary.includes("inputImages"),
   );
+
+  const savedKey = env.pexelsApiKey;
+  env.pexelsApiKey = "";
+  const toolsWithoutKey = createAgentTools(context);
+  check(
+    "未配置 Pexels key 时不把 search_inspiration 交给模型",
+    toolsWithoutKey.every((item) => item.name !== "search_inspiration"),
+  );
+  env.pexelsApiKey = savedKey;
 
   responseMode = "unauthorized";
   let authError = "";

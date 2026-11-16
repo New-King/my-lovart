@@ -1,7 +1,7 @@
 # my-lovart Roadmap
 
 > 这份文件是长期计划，不依赖聊天记录。每完成一个阶段就更新这里的状态和下一步。
-> 最后更新：2026-11-15
+> 最后更新：2026-11-17（重新审计 Phase 2 完成度、provider 注册表与灵感搜索之后）
 
 ## 北极星
 
@@ -21,6 +21,18 @@
 4. 计划、状态、下一步只写进本文件和 `docs/specs/`，不依赖聊天上下文。
 5. 不引入 skills / 品牌套件 / 计费；除非用户明确要求。
 6. “功能做完”不等于“可交付”：每个阶段按 [`docs/specs/reliability-invariants.md`](docs/specs/reliability-invariants.md) 检查失败边界、跨进程读写、stale 写入和首屏反馈；只测 happy path 不算验收。
+
+## 阶段完成度（2026-11-17 审计）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| Phase 0 行为契约 | 完成 | 契约、golden 场景、失败记录都有；自动检查脚本仍未做 |
+| Phase 1 持久化 | 完成 | 消息/画布/附件/文件/checkpoint 均已真实读写验证 |
+| Phase 2 生成作业化 | 2a 完成，2b 未收尾 | 作业队列、worker、画布写入通过；视频真机播放与真实取消未手测，错误分类/限流未做 |
+| Phase 2.5 分镜与视频前期 | 核心完成 | strict/adaptive/loose、锚图组、首尾帧、末帧衔接通过；拼接成片不做（用户明确延后） |
+| Phase 3 画布工具深度 | 未开始 | 目前只能移动/缩放/删除/对齐/分布/层级/透明度 |
+| Phase 4 UI 收敛 | 大部分完成 | 输入框、交错渲染、过程行已做；取消/失败/刷新的一致状态依赖 2b 手测 |
+| Phase 5 可观测与评测 | 部分完成 | JSONL trace 与 `/health` 已做；golden 自动跑未做 |
 
 ## 当前状态
 
@@ -43,10 +55,10 @@
 - [ ] golden 场景自动化
 - [x] 视频前期 golden 对话回放脚本（真实模型，停在视频前，输出自包含 HTML；M30）
 - [x] 普通用户版视频前期回放 + Lavart 视频流程审计（M31，8/8）
-- [x] 灵感搜索 `search_inspiration`（Pexels adapter + 方向卡片；M32，契约测试 9/9；真实 key 待配置）
+- [x] 灵感搜索 `search_inspiration`（Pexels adapter + 方向卡片 + “第 N 组第 M 张”文字选图；M32，契约 12/12、真实模型回放 5/5；真实 key 待配置）
 - [ ] 可观测 trace
 
-## Phase 0 · 行为契约与验收基线（当前）
+## Phase 0 · 行为契约与验收基线（已完成）
 
 目标：把“什么算对”固定下来，之后所有改动都对着它验收。
 
@@ -111,12 +123,16 @@
 
 验收：真实 Seedream 作业 29.4s 成功，资产/画布/artifact 一致；记录 `docs/notes/M17.md`。
 
-### 2b · 进行中
+### 2b · 未收尾（Phase 2 不能算完成）
 
-- [x] 视频画布元素与内联播放（embeddable + renderEmbeddable；真机播放待用户验证）
+- [x] 视频画布元素与内联播放（embeddable + renderEmbeddable；**真机播放仍待用户验证**）
 - [x] 工具卡片持续进度（worker → job 进度 → tool.progress）
-- [ ] 生成中取消真实手测（代码已完成：worker 监听 canceled 并 abort provider）
+- [x] 取消链路代码：停止按钮断 SSE → 服务端 abort → 工具等待 abort → `cancelJob` → worker abort provider（`docs/notes/M17.md`）
+- [ ] 生成中取消真实手测（图片/视频各一次；代码完成不等于验收）
+- [ ] 视频在画布与对话里实际播放（用户环境）
 - [ ] 非重试错误分类、限流与多实例公平性
+
+完成定义：上面 3 个未勾选项有手测记录（截图或 trace），才把 Phase 2 标为完成。2026-11-17 重跑 `verify:persistence / attachments / assets / video-guard 30/30 / video-frame / generation-config 11/11` 均通过，说明近期 provider 注册表、一致性策略、灵感搜索没有破坏 Phase 1–2 的既有契约；但真机播放/取消仍未验证。
 
 ## Phase 2.5 · 分镜与镜头
 
@@ -132,10 +148,11 @@
 - [x] Phase 3b 连贯性：产品/角色/场景/主视觉锚图组，首尾帧链，上一镜末帧承接下一镜（M24，17/17）
 - [x] Phase 3c 实拍锚定与实际末帧：canon 必须基于产品实拍、canon 确认门禁、ffmpeg 抽末帧、按镜序闭环（M25，20/20 + frame）
 - [x] Phase 3d 产品状态锚图：开盖/螺纹/内胆必须补 product_detail 实拍，否则拒绝关键帧（M27，24/24）
-- [x] Phase 3e 一致性策略可配置：strict / adaptive / loose，客户无参考图不再被全局流程卡死（M29，29/29）
+- [x] Phase 3e 一致性策略可配置：strict / adaptive / loose，客户无参考图不再被全局流程卡死（M29，30/30）
 - [x] 默认生图模型切 Seedream 4.5（2K 画幅 + 模型目录 + 展示名解析，M28，11/11）
-- [ ] 多镜头视频拼接成片（ffmpeg/供应商合成）
-- [ ] 跑 G17–G21、G23（G17/G18/G19/G20 已通过；G21/G23 待补）
+- [x] 灵感方向不是强制前置：无方向时先看图选，再生成（M32，契约 12/12 + 回放 5/5）
+- [ ] 多镜头视频拼接成片（ffmpeg/供应商合成；用户明确延后）
+- [ ] 跑 G21（40 资产上下文预算）、G23（生成失败保留状态）；G17–G20 已通过
 
 验收：能改第 3 个镜头、重置后恢复、在两个分镜之间精确切换，不靠模型记忆猜。真实模型已验证（`docs/notes/M21.md`）。
 
@@ -174,4 +191,6 @@
 
 ## 下一步（只做这一件）
 
-用新注册表做一次真实视频前期的 adaptive/strict 对照手测：验证 Seedream 4.5 在“有实拍/无实拍”两种输入下，锚图、关键帧、首尾帧是否按策略产出；仍然停在最终 `generate_video` 前。后台模型选择器等模型目录接口稳定后再做。
+收尾 Phase 2b：先按 [`docs/specs/manual-tests.md`](docs/specs/manual-tests.md) 真实播放一次视频、生成中取消一次（图片或视频），记录结果；随后补非重试错误分类与限流。完成后再进入 Phase 3 画布工具深度（add_text / add_shape / add_line / update_style / update_text）。
+
+视频前期的 strict 分支仍需要客户真实实拍（当前手头没有）；有实拍后按 M26/M29 跑一次，不能拿生成图冒充实拍。真实 Pexels 搜索需要 `PEXELS_API_KEY`。

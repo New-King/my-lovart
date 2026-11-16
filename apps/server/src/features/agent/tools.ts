@@ -10,6 +10,7 @@ import type {
 } from "@my-lovart/shared";
 import { z } from "zod";
 import type { ProjectAsset } from "../assets/assets.js";
+import { env } from "../../lib/env.js";
 import {
   fileDataUrlFromUrl,
   importFileBuffer,
@@ -1020,7 +1021,7 @@ type ToolContext = {
 };
 
 export function createAgentTools(context: ToolContext) {
-  return [
+  const tools = [
     tool(
       async (input) => {
         const plan = await planImageReferences(context, {
@@ -1996,6 +1997,11 @@ export function createAgentTools(context: ToolContext) {
       },
     ),
   ];
+
+  // 没配 Pexels key 时不把工具交给模型：否则模型会反复调用并连续失败，打断对话。
+  return env.pexelsApiKey
+    ? tools
+    : tools.filter((item) => item.name !== "search_inspiration");
 }
 
 type CanvasActionInput = z.infer<typeof canvasCommandSchema>;

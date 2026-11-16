@@ -35,7 +35,8 @@ Video_Remix_Benlai 的 `search_references` 启发了我们：当用户没有明�
 - 1-3 个方向，每个方向 4-6 张；
 - `label` 是给用户看的中文方向名，`query` 是 Pexels 英文检索词；
 - 视频 9:16 用 `orientation: "portrait"`，横屏用 `landscape`；
-- 返回多个 `InspirationBlock`，前端已有卡片可预览、拖拽、点击“加入对话”。
+- 返回多个 `InspirationBlock`，前端已有卡片可预览、拖拽、点击“加入对话”；
+- 未配置 `PEXELS_API_KEY` 时，这个工具不会注册给模型，Agent 改用文字给方向，避免反复调用失败。
 
 ## UI 选择
 
@@ -62,7 +63,7 @@ Video_Remix_Benlai 的 `search_references` 启发了我们：当用户没有明�
 
 ## 验收
 
-`pnpm --filter @my-lovart/server verify:inspiration` 用假 fetch 验证，不消耗真实额度，11/11：
+`pnpm --filter @my-lovart/server verify:inspiration` 用假 fetch 验证，不消耗真实额度，12/12：
 
 - 映射为统一 `InspirationItem`；
 - 优先 `large2x` 主图；
