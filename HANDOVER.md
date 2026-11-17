@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-一个 AI 创作画布的首页 + 工作台：**登录是真的，项目数据落在 Postgres，对话和画布还在内存里。图片走 Volces Seedream、视频走 Metaso MiniMax H3，已经能真实生成并落盘。**
+一个 AI 创作画布的首页 + 工作台：**登录是真的，项目/消息/画布/附件/文件/素材库都落在 Postgres + Storage，刷新或重启不丢。图片走 Volces Seedream、视频走 Metaso MiniMax，已经能真实生成并落盘。** 进度与剩余项看根目录 `ROADMAP.md`，不要按旧版 `docs/PLAN.md` 执行。
 
 ## 怎么跑
 
@@ -56,12 +56,12 @@ supabase        migrations
 
 ## 未实现（按优先级）
 
-1. **画布和对话不持久**。`workspace.store.ts` 是内存 Map，服务重启清空。表已经建好（`canvases`、`sessions`、`messages`），接上即可
-2. **生成文件也在内存里**。`/files/:id` 是内存 Buffer，重启后旧消息里的图片会 404，需要迁到 Supabase Storage
-3. **检查点 / 长任务恢复还没做**。Agent 已经用 LangGraph + deepagents 跑工具循环，但没有接 checkpointer，刷新后不能从断点继续
-4. 视频能生成，但还没有视频入画布和播放器
-5. 没有测试；`pnpm lint` 没跑过
-6. 部署没做（Dockerfile 没有）
+1. **Phase 2b 未收尾**：视频真机播放、生成中取消还没有手测记录；非重试错误分类与限流未做。步骤见 `docs/specs/manual-tests.md`。
+2. **Phase 3 画布工具深度**：目前只能移动/缩放/删除/对齐/分布/层级/透明度，不能加文字/形状/线条、改文字内容或样式。
+3. 多镜头视频拼接成片未做（用户明确暂不优先）。
+4. 分镜 UI 未做；Agent 工具和数据结构已就绪。
+5. 保温杯开盖等状态缺真实产品实拍时仍会身份漂移（见 M26），需要补实拍或视觉一致性校验。
+6. 没有浏览器自动化；golden 场景靠脚本回放和手测清单，`pnpm lint` 没跑过。
 
 ## 真实生成配置
 

@@ -7,6 +7,7 @@ import { UnauthorizedError } from "./lib/auth.js";
 import { registerProjectRoutes } from "./http/projects.js";
 import { registerWorkspaceRoutes } from "./http/workspace.js";
 import { registerFileRoutes } from "./http/files.js";
+import { registerMaterialRoutes } from "./http/materials.js";
 import {
   createMemoryProjectsRepository,
   createSupabaseProjectsRepository,
@@ -97,6 +98,7 @@ export function buildApp() {
   registerProjectRoutes(app, repo);
   registerWorkspaceRoutes(app, repo);
   registerFileRoutes(app);
+  registerMaterialRoutes(app);
 
   return app;
 }

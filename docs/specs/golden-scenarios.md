@@ -282,3 +282,10 @@
 - 期望：服务端从消息 blocks 重建 `<last_inspiration>`；Agent 不重新搜图，直接把该 imageUrl 作为 `inputImages`；生成概念图
 - 禁止：重新 search_inspiration；用错编号的图；让用户再描述一遍；顺手生成视频
 - 验收：`run:inspiration-conversation` 5/5，报告 `verification/inspiration-conversation-2026-11-16/`
+
+## G42 素材库刷新后仍在
+
+- 上下文：用户从素材库上传 1-3 张图片，然后刷新页面 / 重启服务
+- 期望：`GET /materials` 仍返回这些素材；缩略图可显示；加入对话后模型能读到图；删除后列表、`/files/:id`、Storage 对象都消失
+- 禁止：素材只存在前端内存；刷新后变成空库；删除只删列表不删文件；把内存实现当已交付
+- 验收：`verify:materials` 11/11（真实 Supabase + Storage + JWT；`docs/notes/M33.md`）

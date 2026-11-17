@@ -59,3 +59,19 @@ export async function downloadStoredFile(
     return null;
   }
 }
+
+/** 删除 Storage 对象；memory 模式没有远端文件，直接返回。 */
+export async function removeStoredFile(path: string): Promise<boolean> {
+  if (!env.supabaseUrl || !env.supabaseServiceKey) return false;
+  try {
+    const { error } = await getDb().storage.from(STORAGE_BUCKET).remove([path]);
+    if (error) {
+      console.warn(`[storage] 删除 ${path} 失败：`, error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[storage] 删除 ${path} 异常：`, err);
+    return false;
+  }
+}

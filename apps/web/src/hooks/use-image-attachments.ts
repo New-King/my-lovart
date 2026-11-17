@@ -35,7 +35,7 @@ function readDataUrl(file: Blob): Promise<string> {
  * 浏览器侧先缩图：10MB 原图直接 base64 发给服务端会拖慢上传，
  * 也会挤占模型视觉预算。长边 1600 足够识别主体/文字/风格。
  */
-async function prepareImageFile(file: File): Promise<{
+export async function prepareImageFile(file: File): Promise<{
   url: string;
   mimeType: string;
   size: number;

@@ -78,15 +78,24 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(0);
   const [search, setSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const canManage = mode === "manage";
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
     fetchMaterials()
       .then((items) => {
         if (!cancelled) setMaterials(items);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "素材库加载失败");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -94,7 +103,7 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -107,12 +116,22 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
     const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) return;
+    if (images.length === 0) {
+      setError("只支持图片素材（PNG/JPEG/WebP/GIF）");
+      return;
+    }
+    setError(null);
     setUploading((value) => value + images.length);
     for (const file of images) {
       try {
         const material = await uploadMaterial(file);
         setMaterials((prev) => [material, ...prev]);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? `上传失败：${err.message}`
+            : "上传失败，请检查服务端是否启动",
+        );
       } finally {
         setUploading((value) => value - 1);
       }
@@ -120,8 +139,12 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
   };
 
   const handleDelete = async (material: LibraryMaterial) => {
-    await deleteMaterial(material.id);
-    setMaterials((prev) => prev.filter((item) => item.id !== material.id));
+    try {
+      await deleteMaterial(material.id);
+      setMaterials((prev) => prev.filter((item) => item.id !== material.id));
+    } catch (err) {
+      setError(err instanceof Error ? `删除失败：${err.message}` : "删除失败");
+    }
   };
 
   const query = search.trim().toLowerCase();
@@ -187,6 +210,19 @@ export function MaterialLibraryPanel({ mode, onSelect, onClose }: Props) {
         />
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
+          {error && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-line bg-surface px-2.5 py-2 text-[11.5px] text-danger">
+              <span className="min-w-0 flex-1">{error}</span>
+              <button
+                type="button"
+                onClick={() => setReloadKey((value) => value + 1)}
+                className="shrink-0 underline underline-offset-2"
+              >
+                重试
+              </button>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-faint">
               <Loader2 className="size-4 animate-spin" strokeWidth={2} />

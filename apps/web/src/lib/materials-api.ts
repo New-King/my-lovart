@@ -1,47 +1,65 @@
-import { type LibraryMaterial, PUBLIC_MATERIALS } from "./public-materials";
+import {
+  createMaterial,
+  deleteMaterialRecord,
+  listMaterials,
+  type MaterialRecord,
+} from "./api";
+import type { LibraryMaterial } from "./public-materials";
+import { PUBLIC_MATERIALS } from "./public-materials";
+import { prepareImageFile } from "@/hooks/use-image-attachments";
 
-/** 假装上传接口：素材只存在内存里，刷新页面后消失，接后端时替换这里。 */
-const uploadedMaterials: LibraryMaterial[] = [];
-let uploadCount = 0;
+function toLibraryMaterial(record: MaterialRecord): LibraryMaterial {
+  return {
+    id: record.id,
+    name: record.name,
+    url: record.url,
+    mimeType: record.mimeType,
+    width: record.width,
+    height: record.height,
+    uploaded: true,
+  };
+}
 
+/** 上传的素材存服务端（user_materials + /files + Storage），刷新后仍能读回。 */
 export async function fetchMaterials(): Promise<LibraryMaterial[]> {
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  return [...uploadedMaterials, ...PUBLIC_MATERIALS];
+  const uploaded = await listMaterials();
+  return [...uploaded.map(toLibraryMaterial), ...PUBLIC_MATERIALS];
+}
+
+async function measureImage(file: File): Promise<{ width?: number; height?: number }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  } catch {
+    return {};
+  }
 }
 
 export async function uploadMaterial(file: File): Promise<LibraryMaterial> {
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  uploadCount += 1;
-  const material: LibraryMaterial = {
-    id: `uploaded-${Date.now()}-${uploadCount}`,
-    name: file.name.replace(/\.[^.]+$/, "") || "未命名素材",
-    // 必须用 data URL：blob: 只在当前页面的内存里有效，
-    // 发给服务端后既存不下来，也没法交给模型看。
-    url: await fileToDataUrl(file),
-    mimeType: file.type || "image/png",
-    width: 0,
-    height: 0,
-    uploaded: true,
-  };
-  uploadedMaterials.unshift(material);
-  return material;
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () =>
-      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("读取失败"));
-    reader.onerror = () => reject(reader.error ?? new Error("读取失败"));
-    reader.readAsDataURL(file);
+  // 和聊天附件同一条预处理：长边 1600、超 10MB 重编码，避免 base64 过大
+  const prepared = await prepareImageFile(file);
+  const measured = prepared.width ? {} : await measureImage(file);
+  const name = file.name.replace(/\.[^.]+$/, "").slice(0, 120) || "未命名素材";
+  const record = await createMaterial({
+    name,
+    mimeType: prepared.mimeType,
+    dataUrl: prepared.url,
+    ...(prepared.width ?? measured.width
+      ? { width: prepared.width ?? measured.width }
+      : {}),
+    ...(prepared.height ?? measured.height
+      ? { height: prepared.height ?? measured.height }
+      : {}),
   });
+  return toLibraryMaterial(record);
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  const index = uploadedMaterials.findIndex((item) => item.id === id);
-  const material = index === -1 ? undefined : uploadedMaterials[index];
-  if (!material) return;
-  if (material.url.startsWith("blob:")) URL.revokeObjectURL(material.url);
-  uploadedMaterials.splice(index, 1);
+  // 公共素材只读；老版本内存里的 uploaded-* 记录服务端也没有
+  if (!id || id.startsWith("uploaded-") || id.startsWith("poster-") || id.startsWith("insp-")) {
+    return;
+  }
+  await deleteMaterialRecord(id);
 }

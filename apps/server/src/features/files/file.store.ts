@@ -15,6 +15,11 @@ type StoredFile = {
  * 之后接 Supabase Storage 时只替换这一层。
  */
 const files = new Map<string, StoredFile>();
+/**
+ * 已删除的 id 墓碑：Storage 删除是最终一致的，删完立刻 GET /files/:id
+ * 仍可能从远端读回旧对象。墓碑保证删除后不会再被重新缓存成“复活文件”。
+ */
+const deletedFiles = new Set<string>();
 
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 
@@ -109,7 +114,14 @@ export async function importFileBuffer(
   return { id, url: `${baseUrl}${FILE_ROUTE_PREFIX}${id}`, size: data.byteLength };
 }
 
+/** 删除素材时同时清掉进程内副本，之后 /files/:id 直接 404。 */
+export function deleteFile(id: string): void {
+  files.delete(id);
+  deletedFiles.add(id);
+}
+
 export async function getFile(id: string): Promise<StoredFile | undefined> {
+  if (deletedFiles.has(id)) return undefined;
   const cached = files.get(id);
   if (cached) return cached;
 

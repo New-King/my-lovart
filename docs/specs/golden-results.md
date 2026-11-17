@@ -49,6 +49,7 @@
 | G39 普通用户版回放 | 通过（8/8，真实模型回放） | 用户只说“发抖音/竖着拍/早上上班/干净/没有照片”，Agent 自己补全 9:16、晨间通勤、adaptive 设定图；第 1 镜首尾帧；视频前停下；没有“和实物一致”的不当承诺（`docs/notes/M31.md`） |
 | G40 灵感搜索工具 | 契约通过（12/12，假 fetch；真实 key 待配） | Pexels 映射、主图、Authorization、`selection` 编号、2 组方向卡片、无 key 时不注册工具、401/空词错误；UI 可把选中图加入对话（`docs/notes/M32.md`） |
 | G41 文字选图 | 通过（5/5，真实模型回放） | 用户只说“第 2 组第 2 张那种感觉”：不重搜图，`inputImages` 正是该 imageUrl，16:9 概念图，0 次视频；服务端用 `<last_inspiration>` 从消息 blocks 重建编号（`docs/notes/M32.md`） |
+| G42 素材库刷新持久化 | 通过（11/11，真实 Supabase/Storage/JWT） | 上传→重新 GET→Storage 对象→`/files/:id`→删除清理；非图片 400（`docs/notes/M33.md`） |
 
 ## 当前失败/缺口
 

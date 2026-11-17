@@ -219,6 +219,34 @@ export const cancelJob = (projectId: string, jobId: string) =>
     method: "POST",
   });
 
+export type MaterialRecord = {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  width: number;
+  height: number;
+  createdAt: string;
+};
+
+export const listMaterials = () => request<MaterialRecord[]>("/materials");
+
+export const createMaterial = (input: {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+  width?: number;
+  height?: number;
+}) =>
+  request<MaterialRecord>("/materials", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const deleteMaterialRecord = (id: string) =>
+  request<{ ok: boolean }>(`/materials/${id}/delete`, { method: "POST" });
+
 export function sendMessageStream(
   projectId: string,
   input: { text: string; attachments: ChatAttachment[]; aspectRatio?: AspectRatio },
