@@ -44,6 +44,10 @@
 
 `referenceDirect=true` 是分镜级开关：preflight 跳过 `keyframe_required` / `keyframe_not_anchored` / `end_frame_required`，但仍要求 canon 和上一镜视频；出片时服务端自动选参考图——第一镜用 canon 用户图，后续镜用上一镜 `video_last_frame_asset_id`，保证身份和剪辑点，不额外生成关键帧。
 
+## 画幅锁定
+
+`create_storyboard(kind=video)` 必须传 `aspectRatio`；没有就返回 `aspect_ratio_required`。`generate_image` 生成 canon / keyframe / end_frame 时优先使用分镜的 `aspectRatio`，不再让模型随手传的默认 3:4 覆盖 16:9 或 9:16 的片子。当前 run 里已经生成过的旧 3:4 canon 不会被追溯修改；重做时按新规则生成。
+
 用户提供的图可以**直接**成为 canon（`origin=uploaded`），不需要重新生成一版设定图。产品用 `anchorType=product`，角色用 `character`；角色锚在没有产品 canon 时会同时写入 `canon_asset_id`，否则角色视频会被 `canon_required` 卡死。
 
 ## 三层产物
@@ -70,12 +74,14 @@
 
 静态一致性靠锚图组；段落连贯靠“实际视频末帧”：
 
-1. 镜头 1 首帧基于产品锚 + 主视觉锚生成；
-2. 镜头 1 尾帧基于锚图 + 镜头 1 首帧生成；
-3. 镜头 1 出片后用 ffmpeg 抽取实际最后一帧，登记 `video_last_frame_asset_id`；
-4. 镜头 2 首帧只承接这个实际末帧（不是再次生成的尾帧图），再生成镜头 2 尾帧；
-5. 镜头 2 出片、抽末帧，继续下一镜；
-6. 非收尾镜头没有尾帧 → `end_frame_required`；上一镜没视频 → `previous_video_required`；首帧没承接实际末帧 → `continuity_not_anchored`。
+1. 用户确认锚图后，下一轮一次性生成**所有镜头**的首帧 + 尾帧；镜头 2 首帧用镜头 1 尾帧做预览衔接，不要求先有视频。
+2. 全部帧和完整脚本方案一起给用户确认；这是默认的第二个、也是最后一个前期停点。
+3. 用户确认后按镜序连续出片：镜头 1 出片 → ffmpeg 抽实际末帧；
+4. 镜头 2 视频的起始帧优先用镜头 1 **实际末帧**（预生成首帧只作预览），尾帧仍用镜头 2 的 end_frame；
+5. 镜头 2 出片、抽末帧，继续下一镜，不再逐镜确认。
+6. 非收尾镜头没有尾帧 → `end_frame_required`；上一镜没视频 → `previous_video_required`。`continuity_not_anchored` 已取消：连续性由出片时的实际末帧保证。
+
+默认停点只有两个：需要生成锚图时的“锚图确认”，以及“全部分镜图 + 脚本方案”确认。单条 image-to-video 没有这些停点。
 
 MiniMax H3 支持首帧/尾帧图生视频，单段 4-15 秒。图生视频与多模态参考互斥，所以产品信息必须提前固化到首尾帧。抽帧失败时降级到 `end_frame`，不失败整个 job。
 
@@ -133,10 +139,10 @@ migration `0010` / `0011` / `0012`（已执行）：
 - 已确认 canon + 首帧 → 放行
 - 首帧本轮新出 → `keyframe_unconfirmed`
 - 多镜头首镜缺尾帧 → `end_frame_required`
-- 上一镜没视频 → `previous_video_required`
-- 下一镜自动承接上一镜实际末帧
-- 没承接实际末帧的首帧 → `continuity_not_anchored`
+- 上一镜没视频 → `previous_video_required`（出片时仍然强制按镜序）
+- 下一镜出片时自动改用上一镜实际末帧作起始帧
+- 预生成首帧不再要求含上一镜末帧血缘（批量前期）
 - 两镜末帧接通 → 放行
 - 重做同一镜首帧 → 当前已确认首帧是第一参考
 - loose 无 canon/首帧 → 允许直接生成草稿；loose 多镜头 → 不强制末帧衔接
-- `direct=true` 显式跳过
+- `direct=true`：有主体图的单条 image-to-video，或用户原话显式授权；否则拒绝

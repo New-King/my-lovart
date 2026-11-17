@@ -451,6 +451,8 @@ type ImageReferencePlan = {
   shotDirection?: string;
   /** 当前分镜采用的一致性策略 */
   policy?: ConsistencyPolicy;
+  /** 分镜锁定的画幅；关键帧/锚图必须跟随，不能各自默认 3:4 */
+  aspectRatio?: string;
   /** 非阻断提示，例如“没有实拍，已按文字生成设定图” */
   warning?: string;
   error?: Record<string, unknown>;
@@ -595,6 +597,7 @@ export async function planImageReferences(
       sourceAssetIds,
       anchorType,
       policy,
+      ...(board?.aspectRatio ? { aspectRatio: board.aspectRatio } : {}),
       ...(warning ? { warning } : {}),
       ...(input.storyboardId ? { storyboardId: input.storyboardId } : {}),
     };
@@ -740,21 +743,8 @@ export async function planImageReferences(
 
   if (role === "keyframe" && previous) {
     // 多镜头必须按镜序闭环：上一镜先出片、抽末帧，再出这一镜首帧。
-    // loose 是快速草稿档，允许先出独立画面；交付前仍应切回 adaptive/strict 重跑。
-    if (policy !== "loose" && !previous.videoAssetId) {
-      return {
-        role,
-        references: explicit,
-        sourceAssetIds,
-        shotId: input.shotId,
-        policy,
-        error: {
-          error: `上一镜「${previous.title}」还没有视频。多镜头要先把上一镜出片并抽末帧，再生成这一镜首帧，否则只能靠生成的尾帧近似。`,
-          code: "previous_video_required",
-          previous_shot_id: previous.id,
-        },
-      };
-    }
+    // 批量前期允许在上一镜还没出片时先生成本镜关键帧：用上一镜的尾帧做预览衔接；
+    // 等真正出片时，generate_video 会强制按镜序，并改用上一镜实际末帧作为起始帧。
     const continuityId = previous.videoLastFrameAssetId ?? previous.endFrameAssetId;
     if (policy !== "loose" && !continuityId) {
       return {
@@ -833,6 +823,7 @@ export async function planImageReferences(
     shotId: input.shotId,
     storyboardId: board.id,
     policy,
+    ...(board.aspectRatio ? { aspectRatio: board.aspectRatio } : {}),
     ...(shotDirection ? { shotDirection } : {}),
   };
 }
@@ -1036,17 +1027,8 @@ export async function checkVideoPreflight(
           previous_shot_id: previous.id,
         };
       }
-      const anchored =
-        firstFrameId === continuityId ||
-        (frame?.sourceAssetIds.includes(continuityId) ?? false);
-      if (!anchored && !referenceDirect) {
-        return {
-          error:
-            "这一镜首帧没有承接上一镜的实际末帧，剪辑点会跳。重新用 generate_image(shotId, role=keyframe) 出首帧，服务端会自动把上一镜末帧作为参考。",
-          code: "continuity_not_anchored",
-          previous_shot_id: previous.id,
-        };
-      }
+      // 续镜不再要求“预先生成的首帧必须血缘自上一镜末帧”：
+      // 出片时服务端会用上一镜实际末帧作为起始帧，分镜首帧只用于预览。
     }
 
     if (index >= 0 && index < lastIndex && !found.shot.endFrameAssetId && !referenceDirect) {
@@ -1108,6 +1090,9 @@ export function createAgentTools(context: ToolContext) {
         if (plan.error) return JSON.stringify(plan.error);
         const referenceImages = plan.references;
         const role = plan.role;
+        // 视频前期必须跟分镜画幅走；否则 16:9 的片子会出现 9:16 关键帧
+        const aspectRatio = ((plan.aspectRatio as AspectRatio | undefined) ??
+          input.aspectRatio) as AspectRatio;
         const sourceAssetIds = plan.sourceAssetIds;
         const identityLock =
           role === "keyframe" || role === "end_frame"
@@ -1127,7 +1112,7 @@ export function createAgentTools(context: ToolContext) {
               payload: {
                 prompt,
                 title: input.title,
-                aspectRatio: input.aspectRatio,
+                aspectRatio,
                 inputImages: referenceImages,
                 sourceAssetIds,
                 role,
@@ -1208,7 +1193,7 @@ export function createAgentTools(context: ToolContext) {
         try {
           const result = await generateImage({
             prompt,
-            aspectRatio: input.aspectRatio as AspectRatio,
+            aspectRatio,
             referenceImages,
             ...(input.model ? { model: input.model } : {}),
             ...(input.quality ? { quality: input.quality } : {}),
@@ -1231,7 +1216,7 @@ export function createAgentTools(context: ToolContext) {
             title: input.title,
             prompt: prompt.slice(0, 2000),
             model: result.modelDisplayName,
-            aspectRatio: input.aspectRatio,
+            aspectRatio,
             role,
             ...(role === "canon" ? { anchorType: plan.anchorType ?? "product" } : {}),
             sourceAssetIds,
@@ -1310,50 +1295,34 @@ export function createAgentTools(context: ToolContext) {
             if (found.shot.durationSeconds) {
               durationSeconds = Math.round(found.shot.durationSeconds);
             }
+            const repo = await getStoryboardsRepository();
+            const detail = await repo.get(context.projectId, found.storyboard.id);
+            const ordered = detail ? activeShots(detail) : [];
+            const index = ordered.findIndex((item) => item.id === found.shot.id);
+            const previous = index > 0 ? ordered[index - 1] : undefined;
+            const referenceDirect = found.storyboard.metadata?.referenceDirect === true;
+
+            // 起始帧优先级：上一镜实际末帧 > 本镜预生成首帧 > 用户 canon（referenceDirect）。
+            // 这样即使所有分镜图是提前批量生成的，视频仍从上一镜真实末帧接上。
+            const frameIds: string[] = [];
+            const firstId =
+              previous?.videoLastFrameAssetId ??
+              found.shot.firstFrameAssetId ??
+              found.shot.activeAssetId ??
+              (referenceDirect ? found.storyboard.canonAssetId : undefined);
+            if (firstId) frameIds.push(firstId);
+            if (found.shot.endFrameAssetId && found.shot.endFrameAssetId !== firstId) {
+              frameIds.push(found.shot.endFrameAssetId);
+            }
+
             const frames: string[] = [];
-            const firstId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
-            if (firstId) {
-              const first = await (await getAssetsRepository()).get(
-                context.projectId,
-                firstId,
-              );
-              if (first?.kind === "image") {
-                frames.push((await fileDataUrlFromUrl(first.url)) ?? first.url);
-                sourceAssetIds.unshift(first.id);
-              }
+            for (const id of frameIds.slice(0, 2)) {
+              const asset = await (await getAssetsRepository()).get(context.projectId, id);
+              if (asset?.kind !== "image") continue;
+              frames.push((await fileDataUrlFromUrl(asset.url)) ?? asset.url);
+              if (!sourceAssetIds.includes(asset.id)) sourceAssetIds.push(asset.id);
             }
-            if (found.shot.endFrameAssetId) {
-              const end = await (await getAssetsRepository()).get(
-                context.projectId,
-                found.shot.endFrameAssetId,
-              );
-              if (end?.kind === "image") {
-                frames.push((await fileDataUrlFromUrl(end.url)) ?? end.url);
-                sourceAssetIds.push(end.id);
-              }
-            }
-            // referenceDirect：没有关键帧时，第一镜用 canon 参考图，
-            // 后续镜用上一镜实际末帧，保证身份和画面承接，但不额外生成关键帧。
-            if (found.storyboard.metadata?.referenceDirect === true && frames.length === 0) {
-              const repo = await getStoryboardsRepository();
-              const detail = await repo.get(context.projectId, found.storyboard.id);
-              const ordered = detail ? activeShots(detail) : [];
-              const index = ordered.findIndex((item) => item.id === found.shot.id);
-              const previous = index > 0 ? ordered[index - 1] : undefined;
-              const sourceId =
-                previous?.videoLastFrameAssetId ?? found.storyboard.canonAssetId ?? "";
-              if (sourceId) {
-                const source = await (await getAssetsRepository()).get(
-                  context.projectId,
-                  sourceId,
-                );
-                if (source?.kind === "image") {
-                  frames.push((await fileDataUrlFromUrl(source.url)) ?? source.url);
-                  sourceAssetIds.unshift(source.id);
-                }
-              }
-            }
-            if (frames.length > 0) referenceImages = frames.slice(0, 2);
+            if (frames.length > 0) referenceImages = frames;
             const direction = [
               found.shot.sceneGoal ? `镜头职责：${found.shot.sceneGoal}` : "",
               found.shot.continuityNote ? `前后衔接：${found.shot.continuityNote}` : "",
@@ -1884,6 +1853,12 @@ export function createAgentTools(context: ToolContext) {
     tool(
       async (input) => {
         try {
+          if (input.kind === "video" && !input.aspectRatio) {
+            return JSON.stringify({
+              error: "视频分镜必须传 aspectRatio（16:9 / 9:16 / 1:1 等），否则锚图和关键帧会落到默认 3:4。",
+              code: "aspect_ratio_required",
+            });
+          }
           const repo = await getStoryboardsRepository();
           const detail = await repo.create(context.projectId, {
             title: input.title,
@@ -1928,7 +1903,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "create_storyboard",
         description:
-          "创建结构化分镜草稿。视频分镜必须传 kind=video、totalDurationSeconds，并按“每段至少 4 秒”拆镜头：5 秒=1 个，10 秒最多 2 个。不要把 5 秒拆成 3-4 个镜头。按客户素材和交付要求传 consistency：有实拍且要求还原用 strict，普通创意片用 adaptive，只要草稿用 loose。",
+          "创建结构化分镜草稿。视频分镜必须传 kind=video、totalDurationSeconds、aspectRatio（用户确认的画幅，后续锚图/关键帧都跟随），并按“每段至少 4 秒”拆镜头：5 秒=1 个，10 秒最多 2 个。不要把 5 秒拆成 3-4 个镜头。按客户素材和交付要求传 consistency：有实拍且要求还原用 strict，普通创意片用 adaptive，只要草稿用 loose。",
         schema: createStoryboardSchema,
       },
     ),

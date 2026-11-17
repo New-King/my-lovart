@@ -221,7 +221,7 @@
 
 - 上下文：10 秒 2 镜；第 1 镜已出片，服务端已抽取实际末帧
 - 期望：第 2 镜首帧自动引用第 1 镜实际末帧；非收尾镜头缺尾帧时拒绝出片
-- 服务端：`previous_video_required`、`continuity_not_anchored`；接通后才放行
+- 服务端：`previous_video_required`；出片时镜头 2 自动改用镜头 1 实际末帧作起始帧（预生成首帧不再要求末帧血缘）
 - 禁止：第 2 镜首帧自由发挥；用生成的 end_frame 冒充实际末帧（loose 除外）
 
 ## G33 实拍锚定与末帧抽取
@@ -304,7 +304,7 @@
 - 期望：建 kind=video 分镜并设 `referenceDirect=true`；`register_reference` 把用户图登记为 canon；逐镜直接拿参考图出片，第一镜用 canon，第二镜用上一镜实际末帧；不生成关键帧/角色设定图
 - 例外：两镜角度差异极大、单张参考约束不住，或需要精确构图时，才关掉 referenceDirect 生成 keyframe
 - 禁止：忽略用户图、重新生成一版 canon；角色锚没有写入 `canon_asset_id` 导致 `canon_required`
-- 验收：`verify:video-guard` 35/35（角色 canon + referenceDirect 用例）
+- 验收：`verify:video-guard` 36/36（角色 canon + referenceDirect 用例）
 
 ## G45 答完问题后不能只给文字分镜
 
@@ -312,3 +312,11 @@
 - 期望：同轮 `create_storyboard` + `generate_image(role=canon)`（或 `register_reference`）；把分镜和设定图一起给用户；结尾明确问“这版可以吗/要不要换方式”
 - 禁止：只调用 `create_storyboard` 就结束；用“确认后我就生成设定图”这种陈述句收尾；承诺下一步却不执行
 - 验收：`run:video-confirmation-probe` 4/4（`docs/notes/M35.md`）
+
+## G46 锚图确认后批量做完所有分镜图
+
+- 上下文：10 秒 2 镜、无实拍；用户已确认产品 canon
+- 期望：同轮一次性生成两镜首帧 + 尾帧；不逐镜/逐帧停下问；全部完成后给完整脚本方案，只问一次“按这个顺序出片吗？”
+- 禁止：只生成第 1 镜首帧就停；要求先出第 1 镜视频才能生成第 2 镜首帧；每张图确认一次
+- 用户确认后：直接进入 `generate_video`，不重新生成分镜图；按镜序连续出片
+- 验收：`run:batch-preproduction-probe` 7/7（真实模型 + 假方舟出图；`docs/notes/M36.md`）

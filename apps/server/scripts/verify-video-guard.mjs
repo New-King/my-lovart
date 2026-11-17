@@ -119,6 +119,7 @@ try {
     title: "用户参考图分镜",
     brief: "用户已经提供了角色图，直接作为身份基准",
     kind: "video",
+    aspectRatio: "16:9",
     totalDurationSeconds: 10,
     metadata: { consistency: "adaptive" },
     shots: [
@@ -157,6 +158,16 @@ try {
     "referenceDirect：有用户 canon 时不需要先生成关键帧",
     referenceDirectPreflight === null,
     referenceDirectPreflight?.code ?? "allowed",
+  );
+
+  const framedPlan = await planImageReferences(
+    baseContext(new Date(Date.now() + 5000).toISOString()),
+    { role: "keyframe", shotId: referenceBoard.shots[0].id },
+  );
+  check(
+    "关键帧继承分镜画幅（16:9 不会生成 9:16）",
+    !framedPlan.error && framedPlan.aspectRatio === "16:9",
+    framedPlan.error?.code ?? framedPlan.aspectRatio ?? "missing",
   );
 
   // image-to-video 的 direct 许可：有主体图才允许，否则要用户原话显式授权
@@ -618,8 +629,8 @@ try {
     shotId: shot2.id,
   });
   check(
-    "上一镜没视频时不允许出下一镜首帧",
-    beforeVideo.error?.code === "previous_video_required",
+    "上一镜没视频时允许批量生成下一镜首帧（用尾帧做预览衔接）",
+    !beforeVideo.error,
     beforeVideo.error?.code ?? "allowed",
   );
 
@@ -706,8 +717,8 @@ try {
     false,
   );
   check(
-    "没承接上一镜实际末帧的首帧被拒绝",
-    loose?.code === "continuity_not_anchored",
+    "预生成首帧不要求上一镜末帧血缘，出片时改用实际末帧",
+    loose === null,
     loose?.code ?? "allowed",
   );
 

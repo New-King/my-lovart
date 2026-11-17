@@ -38,7 +38,7 @@
 | G30 视频前期闸门 | 通过（6/6，脚本验收） | 无 shotId、本轮新建镜头、缺首帧、本轮新首帧均被拦；上轮脚本+首帧放行；`direct=true` 显式跳过。不调用视频服务（`docs/notes/M22.md`） |
 
 | G31 视频前期一致性 | 通过（24/24，脚本验收） | 锚图组 + 关键帧血缘 + 5 秒 1 镜头/10 秒最多 2 镜头；无产品锚/无血缘首帧/5 秒 4 镜头均被拒（`docs/notes/M23.md`） |
-| G32 多镜头连贯性 | 通过（24/24，脚本验收） | 首镜缺尾帧拒绝；上一镜没视频 `previous_video_required`；下一镜首帧自动引用上一镜实际末帧；没承接末帧 `continuity_not_anchored`；两镜末帧接通后放行（`docs/notes/M24.md`） |
+| G32 多镜头连贯性 | 通过（24/24，脚本验收；2026-11-17 改为出片时实际末帧承接，`continuity_not_anchored` 取消） | 首镜缺尾帧拒绝；上一镜没视频 `previous_video_required`；镜头 2 出片改用上一镜实际末帧；两镜末帧接通后放行（`docs/notes/M24.md`、M36） |
 | G33 实拍锚定与末帧抽取 | 通过（20/20 + frame 验收） | 无产品实拍 `canon_photo_required`；本轮新锚图 `canon_unconfirmed`；视频末帧用 ffmpeg 实抽，降级不失败 job（`docs/notes/M25.md`） |
 
 | G34 真实保温杯前期验证 | 部分通过 | 闭盖 v1 锚图/首尾帧同一产品；开盖 v2 杯身变宽、螺纹口被发明，身份不合格。顺带修复本地 `/files` URL 传给 provider 导致 400（`docs/notes/M26.md`） |
@@ -51,8 +51,9 @@
 | G41 文字选图 | 通过（5/5，真实模型回放） | 用户只说“第 2 组第 2 张那种感觉”：不重搜图，`inputImages` 正是该 imageUrl，16:9 概念图，0 次视频；服务端用 `<last_inspiration>` 从消息 blocks 重建编号（`docs/notes/M32.md`） |
 | G42 素材库刷新持久化 | 通过（11/11，真实 Supabase/Storage/JWT） | 上传→重新 GET→Storage 对象→`/files/:id`→删除清理；非图片 400（`docs/notes/M33.md`） |
 | G43 角色图单镜头 image-to-video | 通过（5/5，真实模型行为探针） | 直接 `generate_video`，0 次生图/分镜；不说“先做角色设定图”；视频渠道缺失时如实报告（`docs/notes/M34.md`） |
-| G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 35/35） | `register_reference` 把用户图登记为 canon；`referenceDirect` 跳过关键帧/尾帧；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
+| G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 36/36） | `register_reference` 把用户图登记为 canon；`referenceDirect` 跳过关键帧/尾帧；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
 | G45 答完问题不止于文字分镜 | 通过（4/4，真实模型两轮） | 第二轮同轮 `create_storyboard` + `generate_image`；没有“确认后我就…”空承诺；结尾是明确问题（`docs/notes/M35.md`） |
+| G46 锚图确认后批量出全部分镜图 | 通过（7/7，真实模型 + 假方舟） | 两镜首尾帧同轮生成；只停一次给脚本方案；确认后直接进 `generate_video`，不重生成图（`docs/notes/M36.md`） |
 
 ## 当前失败/缺口
 
