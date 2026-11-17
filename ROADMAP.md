@@ -161,6 +161,7 @@
 - [x] 多镜头批量前期：锚图确认后一次生成全部首尾帧，只停一次给脚本方案；确认后按镜序连续出片（M36，probe 7/7）
 - [x] 聊天图片统一左上角“加入对话”入口；搜图未配置时工具仍会调用失败标红，不再悄悄不搜（M37，probe 5/5）
 - [x] 动作镜头必须有执行主体：无人物产品图不能当压弯/骑行首帧；视频 prompt 以首帧状态为起点（M40，action-guard 6/6）
+- [ ] 结构化镜头契约：`subject / action / camera / startState / endState / allowedMotion`；按结构校验和拼 prompt，替代关键词兜底（草案 `docs/specs/video-shot-model.md`）
 - [ ] 多镜头视频拼接成片（ffmpeg/供应商合成；用户明确延后）
 - [ ] 跑 G21（40 资产上下文预算）、G23（生成失败保留状态）；G17–G20 已通过
 

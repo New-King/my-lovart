@@ -481,8 +481,8 @@ export function promptRequiresProductDetail(text: string): boolean {
 }
 
 /**
- * 哪些词意味着镜头里有“人/骑手在完成动作”。
- * 单独的“高速/掠过”可能只是镜头运动，所以车辆位移要求“车型 + 驶入/冲来”同句出现。
+ * 旧分镜的兜底检查：只挡“显式写了动作但完全没写主体”的矛盾。
+ * 通用方案见 docs/specs/video-shot-model.md；不要继续往这个词表里堆项目案例。
  */
 const HUMAN_ACTION =
   /压弯|骑行|骑手|车手|摇车|踩踏|蹬踏|起身|站起|站起来|奔跑|跑步|跳跃|跳起|行走|走路|挥手|转身|弯腰|俯身|伸手/;
