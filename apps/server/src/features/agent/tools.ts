@@ -4,6 +4,7 @@ import type {
   AnchorType,
   AspectRatio,
   CanvasCommand,
+  ChatAttachment,
   ImageBlock,
   InspirationBlock,
   VideoBlock,
@@ -96,7 +97,9 @@ const videoSchema = z.object({
     .boolean()
     .optional()
     .default(false)
-    .describe("只有用户明确说“直接出片/不用确认”时才传 true；默认 false，必须先确认脚本和首帧关键图"),
+    .describe(
+      "单条视频直接出片：用户给了主体图做 image-to-video（传 inputImages），或用户原话明确说“直接出片/不用确认”时传 true；其他视频保持 false，先给脚本和画面。",
+    ),
   model: z
     .string()
     .min(1)
@@ -106,6 +109,20 @@ const videoSchema = z.object({
     .enum(["480p", "720p", "1080p"])
     .optional()
     .describe("可选输出分辨率，只有用户明确要求时才传"),
+});
+
+const registerReferenceSchema = z.object({
+  title: z.string().min(1).max(80).describe("给这张参考图一个短标题，例如「用户提供的角色形象」"),
+  assetId: z
+    .string()
+    .min(1)
+    .describe("直接复用用户提供的图：<input_images> 的 asset_id（asset-…）或项目资产 id"),
+  storyboardId: z.string().min(1).describe("要挂到哪个视频分镜；多镜头必须传"),
+  anchorType: z
+    .enum(["product", "character", "scene", "style"])
+    .optional()
+    .default("character")
+    .describe("这张参考图代表哪类身份基准；角色视频用 character，产品视频用 product"),
 });
 
 const searchInspirationSchema = z.object({
@@ -873,6 +890,44 @@ async function attachVideoToShot(
   }
 }
 
+/** 用户原话里的显式“跳过前期”授权，避免模型自己替用户决定。 */
+export function userAllowsDirectVideo(text: string | undefined): boolean {
+  return Boolean(text && /直接出片|不用确认|不用脚本|跳过确认|直接生成/.test(text));
+}
+
+/**
+ * 单条视频直接出片的许可规则：
+ * - 用户给了主体图（本轮附件或上传资产），就是 image-to-video，不需要 canon/关键帧；
+ * - 或者用户原话明确说“直接出片/不用确认”；
+ * - 两者都没有时，direct=true 视为偷懒，拒绝。
+ */
+export function checkDirectVideoInput(input: {
+  direct: boolean;
+  inputImages?: string[];
+  attachmentMap: Record<string, string>;
+  projectAssets: ProjectAsset[];
+  userText?: string;
+}): { allowed: boolean; source: boolean; reason?: string } {
+  if (!input.direct) return { allowed: true, source: false };
+
+  const sourceIds = input.inputImages ?? [];
+  const hasUserSource = sourceIds.some((id) => {
+    if (input.attachmentMap[id]) return true;
+    return input.projectAssets.some(
+      (asset) => asset.id === id && asset.origin === "uploaded",
+    );
+  });
+  if (hasUserSource || userAllowsDirectVideo(input.userText)) {
+    return { allowed: true, source: hasUserSource };
+  }
+  return {
+    allowed: false,
+    source: false,
+    reason:
+      "direct=true 只用于两种情况：用户提供了主体图（image-to-video 单条短片），或用户原话明确说“直接出片/不用确认”。其他视频先给脚本和画面。",
+  };
+}
+
 export async function checkVideoPreflight(
   context: ToolContext,
   shotId: string | undefined,
@@ -1011,6 +1066,10 @@ type ToolContext = {
   projectId: string;
   runStartedAt: string;
   threadId?: string;
+  /** 本轮用户原话：判断“直接出片”这类显式授权，不靠模型转述 */
+  userText?: string;
+  /** 本轮附件：用户提供的参考图可以直接变成 canon，而不必重新生成 */
+  attachments?: ChatAttachment[];
   attachmentMap: Record<string, string>;
   canvasSummary: string;
   canvasElements: CanvasElementBrief[];
@@ -1194,10 +1253,25 @@ export function createAgentTools(context: ToolContext) {
     ),
     tool(
       async (input) => {
+        const direct = input.direct ?? false;
+        const directCheck = checkDirectVideoInput({
+          direct,
+          ...(input.inputImages ? { inputImages: input.inputImages } : {}),
+          attachmentMap: context.attachmentMap,
+          projectAssets: context.projectAssets,
+          ...(context.userText ? { userText: context.userText } : {}),
+        });
+        if (!directCheck.allowed) {
+          return JSON.stringify({
+            error: directCheck.reason,
+            code: "direct_requires_source",
+          });
+        }
+
         const preflight = await checkVideoPreflight(
           context,
           input.shotId,
-          input.direct ?? false,
+          direct,
         );
         if (preflight) return JSON.stringify(preflight);
 
@@ -1379,8 +1453,83 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_video",
         description:
-          "生成一条视频。默认先有 canon 设定图、镜头脚本和该镜头首帧关键图；strict/adaptive 会强制这些前期，loose 允许直接按文字/参考生成。服务端会自动把该镜头首帧、尾帧作为参考，时长取镜头的 durationSeconds。只有用户明确说“直接出片/不用确认”才能传 direct=true 跳过。",
+          "生成一条视频。两种模式：①单条 image-to-video：用户给了主体图并要单镜头动效，传 inputImages=[那张图]、direct=true，不需要分镜/canon/关键帧；②多镜头或纯文字概念片：先有 canon 身份基准、镜头脚本和该镜头首帧，strict/adaptive 会强制这些前期，loose 允许直接按文字/参考生成。有镜头时首帧/尾帧由服务端锁定，时长取镜头 durationSeconds。",
         schema: videoSchema,
+      },
+    ),
+    tool(
+      async (input) => {
+        const key = input.assetId.trim();
+        const attachment =
+          context.attachments?.find(
+            (item) => key === item.id || key === `asset-${item.id}`,
+          ) ?? null;
+        const projectAsset =
+          context.projectAssets.find((item) => item.id === key) ?? null;
+
+        const assets = await getAssetsRepository();
+        let assetId = "";
+        let source: "user_upload" | "project_asset" = "user_upload";
+
+        try {
+          if (attachment) {
+            const asset: ProjectAsset = {
+              id: randomUUID(),
+              projectId: context.projectId,
+              kind: "image",
+              origin: "uploaded",
+              title: input.title,
+              prompt: "",
+              url: attachment.url,
+              mimeType: attachment.mimeType,
+              width: attachment.width ?? 0,
+              height: attachment.height ?? 0,
+              sourceAssetIds: [],
+              metadata: {
+                role: "canon",
+                anchorType: input.anchorType,
+                source: "user_upload",
+              },
+              createdAt: new Date().toISOString(),
+            };
+            await assets.save(context.projectId, asset);
+            assetId = asset.id;
+          } else if (projectAsset && projectAsset.kind === "image") {
+            assetId = projectAsset.id;
+            source = "project_asset";
+          } else {
+            return JSON.stringify({
+              error:
+                "找不到这张参考图。用户图要用 <input_images> 里的 asset_id；项目里生成过的图才用资产 id。",
+              code: "reference_not_found",
+            });
+          }
+
+          const repo = await getStoryboardsRepository();
+          const board = await repo.setAnchorAsset(
+            context.projectId,
+            input.storyboardId,
+            input.anchorType,
+            assetId,
+          );
+
+          return JSON.stringify({
+            summary: `已把「${input.title}」登记为该分镜的${input.anchorType === "character" ? "角色" : input.anchorType}身份基准（canon），后续镜头直接以它为参考，不需要再生成一版设定图。`,
+            asset_id: assetId,
+            storyboard_id: board.id,
+            anchor_type: input.anchorType,
+            canon_asset_id: board.canonAssetId ?? null,
+            source,
+          });
+        } catch (error) {
+          return errorResult(error);
+        }
+      },
+      {
+        name: "register_reference",
+        description:
+          "把用户已经提供的图直接登记为分镜的身份基准（canon），不重新生成。适合：用户上传角色/产品参考图，随后要做多镜头视频。登记后关键帧以它为参考；只有确实需要新角度/干净转面图时才再生成图。单镜头 image-to-video 不需要调用这个工具，直接把图传给 generate_video 的 inputImages。",
+        schema: registerReferenceSchema,
       },
     ),
     tool(

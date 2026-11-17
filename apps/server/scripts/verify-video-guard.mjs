@@ -8,9 +8,11 @@ import { getDb } from "../dist/db/supabase.js";
 import { getAssetsRepository } from "../dist/features/assets/assets.repository.js";
 import { getStoryboardsRepository } from "../dist/features/storyboards/storyboards.repository.js";
 import {
+  checkDirectVideoInput,
   checkVideoPreflight,
   createAgentTools,
   planImageReferences,
+  userAllowsDirectVideo,
 } from "../dist/features/agent/tools.js";
 
 const projectId = randomUUID();
@@ -96,6 +98,86 @@ try {
     "strict 策略没有细节实拍时拒绝纯文生图细节锚图",
     noDetailPhoto.error?.code === "detail_photo_required",
     noDetailPhoto.error?.code ?? "allowed",
+  );
+
+  // 用户已经给了角色图：应该直接登记为 canon，而不是再生成一版“角色设定图”
+  const referenceContext = {
+    ...baseContext(new Date().toISOString()),
+    userText: "生成 5 秒的视频，让这个人物站起来向我靠近",
+    attachments: [
+      {
+        id: "user-char",
+        name: "角色参考图",
+        mimeType: "image/png",
+        url: "/files/user-char",
+        size: 1024,
+      },
+    ],
+    attachmentMap: { "asset-user-char": "data:image/png;base64,AAAA" },
+  };
+  const referenceBoard = await repo.create(projectId, {
+    title: "用户参考图分镜",
+    brief: "用户已经提供了角色图，直接作为身份基准",
+    kind: "video",
+    totalDurationSeconds: 10,
+    metadata: { consistency: "adaptive" },
+    shots: [
+      { title: "S1", durationSeconds: 5 },
+      { title: "S2", durationSeconds: 5 },
+    ],
+  });
+  const referenceTools = createAgentTools(referenceContext);
+  const registerTool = referenceTools.find((item) => item.name === "register_reference");
+  const registered = JSON.parse(
+    await registerTool.invoke({
+      title: "用户角色图",
+      assetId: "asset-user-char",
+      storyboardId: referenceBoard.storyboard.id,
+      anchorType: "character",
+    }),
+  );
+  const boardAfterRegister = await repo.get(projectId, referenceBoard.storyboard.id);
+  check(
+    "用户提供的角色图可直接登记为 canon（不重新生成）",
+    Boolean(registered.asset_id) &&
+      boardAfterRegister?.storyboard.characterAnchorAssetId === registered.asset_id &&
+      boardAfterRegister?.storyboard.canonAssetId === registered.asset_id,
+    registered.error ?? registered.asset_id ?? "no asset",
+  );
+
+  // image-to-video 的 direct 许可：有主体图才允许，否则要用户原话显式授权
+  const directWithSource = checkDirectVideoInput({
+    direct: true,
+    inputImages: ["asset-user-char"],
+    attachmentMap: { "asset-user-char": "data:image/png;base64,AAAA" },
+    projectAssets: [],
+    userText: "生成 5 秒的视频，让这个人物站起来向我靠近",
+  });
+  const directWithoutSource = checkDirectVideoInput({
+    direct: true,
+    inputImages: [],
+    attachmentMap: {},
+    projectAssets: [],
+    userText: "生成 5 秒的视频，让这个人物站起来向我靠近",
+  });
+  const directExplicit = checkDirectVideoInput({
+    direct: true,
+    inputImages: [],
+    attachmentMap: {},
+    projectAssets: [],
+    userText: "直接出片，不用确认",
+  });
+  check(
+    "有主体图时单条 image-to-video 允许 direct",
+    directWithSource.allowed && directWithSource.source,
+  );
+  check(
+    "没有主体图、用户也没说直接出片时拒绝 direct",
+    !directWithoutSource.allowed,
+  );
+  check(
+    "用户原话明确“直接出片”时允许 direct",
+    directExplicit.allowed && userAllowsDirectVideo("直接出片，不用确认"),
   );
 
   const adaptiveCanon = await planImageReferences(

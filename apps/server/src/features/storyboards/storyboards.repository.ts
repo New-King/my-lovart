@@ -768,7 +768,7 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
     },
 
     async setAnchorAsset(projectId, storyboardId, anchorType, assetId) {
-      await requireBoard(projectId, storyboardId);
+      const board = await requireBoard(projectId, storyboardId);
       if (assetId) {
         const asset = await (await getAssetsRepository()).get(projectId, assetId);
         if (!asset || asset.kind !== "image") {
@@ -785,9 +785,18 @@ function createSupabaseStoryboardsRepository(): StoryboardsRepository {
             : anchorType === "scene"
               ? "scene_anchor_asset_id"
               : "style_anchor_asset_id";
+      const update: Record<string, unknown> = {
+        [column]: assetId,
+        updated_at: new Date().toISOString(),
+      };
+      // 角色也是整条片子的身份基准；没有产品 canon 时，角色图就是 canon。
+      // 否则角色视频会被 preflight 的 canon_required 卡死，只能被迫先做一版“角色设定图”。
+      if (anchorType === "character" && assetId && !board.storyboard.canonAssetId) {
+        update.canon_asset_id = assetId;
+      }
       const { data, error } = await db()
         .from("storyboards")
-        .update({ [column]: assetId, updated_at: new Date().toISOString() })
+        .update(update)
         .eq("id", storyboardId)
         .eq("project_id", projectId)
         .select(BOARD_COLUMNS)
@@ -1145,6 +1154,10 @@ function createMemoryStoryboardsRepository(): StoryboardsRepository {
       board.detail.storyboard = {
         ...board.detail.storyboard,
         [key]: assetId ?? undefined,
+        // 角色也是整条片子的身份基准；没有产品 canon 时，角色图就是 canon。
+        ...(anchorType === "character" && assetId && !board.detail.storyboard.canonAssetId
+          ? { canonAssetId: assetId }
+          : {}),
         updatedAt: new Date().toISOString(),
       };
       return board.detail.storyboard;

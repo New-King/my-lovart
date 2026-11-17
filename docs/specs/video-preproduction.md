@@ -1,8 +1,8 @@
-# 视频前期：锚图组、关键帧、镜头时长与连贯性
+# 视频前期：先选路径，再做锚图/关键帧/连贯性
 
-> 状态：Phase 3a/3b/3c/3d/3e 已实现（多镜头拼接未实现）
-> 最后更新：2026-11-16
-> 关联：`docs/notes/M23.md`、`docs/notes/M24.md`、`docs/notes/M25.md`、`docs/notes/M27.md`、`docs/notes/M29.md`、`docs/specs/project-state-and-storyboard.md`
+> 状态：Phase 3a/3b/3c/3d/3e 已实现（多镜头拼接未实现）；2026-11-17 修正为条件流程
+> 最后更新：2026-11-17
+> 关联：`docs/notes/M23.md`、`M24`、`M25`、`M27`、`M29`、`M34`、`docs/specs/project-state-and-storyboard.md`
 
 ## 问题
 
@@ -16,7 +16,7 @@
 
 ## 外部参考审计
 
-**Lavart 仓库**没有这套前期模型：`video-generate.ts` 的 `inputImages` 最多 7 张，第一张作为首帧；前端提供首帧/尾帧上传；prompt 只有“视频 → generate_video”。没有 canon、storyboard、镜头时长或确认闸门，照抄解决不了产品一致性。
+**Lavart 仓库**没有这套多镜头前期模型：`video-generate.ts` 的 `inputImages` 最多 7 张，第一张作为首帧；前端提供首帧/尾帧上传；prompt 只有“视频 → generate_video”。它的优点正是单条 image-to-video 很直接；缺点是多镜头没有 canon/continuity。我们两条都要：单条走 A 路径，多镜头才进入锚图/分镜。
 
 **Video_Remix_Benlai** 的 `无限画布-生成视频对话参考.txt` 展示了正确的工作方式：以分镜图作为首帧逐镜生成、4 秒为最小单位、镜头逐条确认；但真正有价值的是它的制作级规格文档：
 
@@ -27,6 +27,22 @@
 - 锚图按 brief 动态规划，不固定每次都生成角色图；没有人物就不强加角色锚。
 
 它自己承认这套“锚图映射”是工程假设，不是参考网站已证实的公开规则；我们取它的结构和连贯性方法，不照搬固定模板。
+
+## 先选路径（条件流程，不是固定流水线）
+
+视频没有一条统一流水线。先看用户已有的素材和交付形态：
+
+| 场景 | 做法 | 不做什么 |
+| --- | --- | --- |
+| A 单镜头/单动作 + 已有主体图 | `generate_video({ inputImages:[那张图], durationSeconds, prompt, direct:true })`，直接 image-to-video | 不生成角色/产品设定图，不出首尾帧，不建分镜 |
+| B 多镜头 + 已有主体参考图 | 建 `kind=video` 分镜；`register_reference(assetId, storyboardId, anchorType)` 把用户图登记为 canon；关键帧以它为参考 | 不再生成“一版角色设定图”；除非现有图角度/细节不足且说明原因 |
+| C 多镜头 + 没有参考图 | 按 consistency 生成一次 canon（产品/角色/场景按 brief），确认后逐镜 keyframe | 不固定生成四张锚图 |
+| D 纯文字单镜头、没有图 | 建 1 镜分镜 + 首帧给用户确认；用户原话允许时可以 direct | 不假装已有参考图 |
+| E 用户要脚本/分镜/概念探索 | 先文字/分镜，不急着出图/出片 | 不把“要视频”当成“确认了画面” |
+
+`direct=true` 的许可由服务端判定（`checkDirectVideoInput`）：有主体图做单条 image-to-video，或用户原话明确“直接出片/不用确认”；两者都没有时拒绝，避免模型偷懒跳过整个前期。
+
+用户提供的图可以**直接**成为 canon（`origin=uploaded`），不需要重新生成一版设定图。产品用 `anchorType=product`，角色用 `character`；角色锚在没有产品 canon 时会同时写入 `canon_asset_id`，否则角色视频会被 `canon_required` 卡死。
 
 ## 三层产物
 

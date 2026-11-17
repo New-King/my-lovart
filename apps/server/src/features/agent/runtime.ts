@@ -72,6 +72,7 @@ const KNOWN_TOOLS: ToolName[] = [
   "list_assets",
   "get_asset",
   "search_inspiration",
+  "register_reference",
   "list_storyboards",
   "get_storyboard",
   "create_storyboard",
@@ -150,6 +151,13 @@ function toolStartMeta(
         title: "整理问题",
         detail: `${questions.length} 个问题`,
         ...(titles.length > 0 ? { inputSummary: titles.join("\n") } : {}),
+      };
+    }
+    case "register_reference": {
+      const title = clip(args?.title, 80);
+      return {
+        title: "登记参考图",
+        ...(title ? { detail: title } : {}),
       };
     }
     case "search_inspiration": {
@@ -366,6 +374,8 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     bus,
     projectId: input.projectId,
     runStartedAt: input.runStartedAt,
+    userText: input.text,
+    attachments: input.attachments,
     ...(input.threadId ? { threadId: input.threadId } : {}),
     attachmentMap: { ...attachmentContext.map, ...canvasContext.map },
     canvasSummary: canvasContext.summary,

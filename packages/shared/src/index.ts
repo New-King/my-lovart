@@ -19,6 +19,7 @@ export type ToolName =
   | "list_assets"
   | "get_asset"
   | "search_inspiration"
+  | "register_reference"
   | "list_storyboards"
   | "get_storyboard"
   | "create_storyboard"

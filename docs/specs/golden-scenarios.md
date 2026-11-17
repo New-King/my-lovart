@@ -207,7 +207,7 @@
 - 上下文：用户要一条 5 秒视频，直接（或答完需求问题后）要求出片
 - 期望：不调用 `generate_video`；先给脚本（含节拍）、建 1 个镜头、出首帧关键图，并明确请用户确认后停止；下一轮确认后才出片
 - 服务端：`generate_video` 在无 `shotId`、镜头本轮新建、缺首帧、首帧本轮新出时返回 `video_plan_required` / `video_plan_unconfirmed` / `keyframe_required` / `keyframe_unconfirmed`，不提交作业
-- 例外：用户明确说“直接出片/不用确认”时才允许 `direct=true`
+- 例外：用户明确说“直接出片/不用确认”，或用户给了主体图并要单条 image-to-video（`inputImages` + `direct=true`）时才允许跳过
 - 禁止：答完问题当轮直接出片；没有脚本/关键图就调用视频；本轮说“确认后出片”却已提交作业
 
 ## G31 视频前期一致性：锚图组与时长预算
@@ -289,3 +289,18 @@
 - 期望：`GET /materials` 仍返回这些素材；缩略图可显示；加入对话后模型能读到图；删除后列表、`/files/:id`、Storage 对象都消失
 - 禁止：素材只存在前端内存；刷新后变成空库；删除只删列表不删文件；把内存实现当已交付
 - 验收：`verify:materials` 11/11（真实 Supabase + Storage + JWT；`docs/notes/M33.md`）
+
+## G43 用户角色图单镜头 image-to-video
+
+- 上下文：用户上传一张角色图，输入“生成 5 秒的视频，让这个人物站起来向我靠近”
+- 期望：直接 `generate_video({ inputImages:[该图], durationSeconds:5, direct:true })`；比例从图/平台推断；不建分镜
+- 禁止：调用 `generate_image` 生成角色设定图/首尾帧；调用 `create_storyboard`；回复“先做一版角色设定图确认形貌”
+- 例外：图只有局部/遮挡导致动作必然走形时，可以提出“补一张图/两版站姿”的**可选**建议，但不能当默认流程
+- 验收：`run:image-to-video-probe` 5/5（`docs/notes/M34.md`）
+
+## G44 多镜头 + 用户参考图
+
+- 上下文：用户给角色/产品参考图，要 10 秒 2 镜
+- 期望：建 kind=video 分镜；`register_reference` 把用户图登记为 canon；关键帧以它为参考；不另生成角色设定图
+- 禁止：忽略用户图、重新生成一版 canon；角色锚没有写入 `canon_asset_id` 导致 `canon_required`
+- 验收：`verify:video-guard` 34/34（角色 canon 用例）

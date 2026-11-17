@@ -36,6 +36,7 @@ const TOOL_ICONS = {
   list_assets: FileSearch,
   get_asset: FileSearch,
   search_inspiration: Search,
+  register_reference: ImagePlus,
   list_storyboards: List,
   get_storyboard: FileText,
   create_storyboard: Plus,
