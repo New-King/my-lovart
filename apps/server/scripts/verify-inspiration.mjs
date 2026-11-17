@@ -152,9 +152,19 @@ try {
   const savedKey = env.pexelsApiKey;
   env.pexelsApiKey = "";
   const toolsWithoutKey = createAgentTools(context);
+  const searchWithoutKey = toolsWithoutKey.find(
+    (item) => item.name === "search_inspiration",
+  );
+  const failure = JSON.parse(
+    await searchWithoutKey.invoke({
+      title: "无 key 测试",
+      directions: [{ label: "极简", query: "minimal still life" }],
+    }),
+  );
   check(
-    "未配置 Pexels key 时不把 search_inspiration 交给模型",
-    toolsWithoutKey.every((item) => item.name !== "search_inspiration"),
+    "未配置 key 时工具仍注册，调用会失败（过程可标红）",
+    Boolean(searchWithoutKey) && failure.code === "invalid_config",
+    failure.code ?? failure.error ?? "missing",
   );
   env.pexelsApiKey = savedKey;
 

@@ -349,6 +349,9 @@ export function ChatPanel({
                             onPreview={(attachment) =>
                               setPreview({ src: attachment.url, name: attachment.name })
                             }
+                            onAddReference={(item) =>
+                              composerRef.current?.addReference(item)
+                            }
                           />
                         </div>
                       )}

@@ -47,13 +47,14 @@
 | G37 一致性策略 | 通过（30/30） | strict 缺实拍拒绝；adaptive 允许生成设定图并 warning；loose 允许无 canon/首帧草稿、不强制末帧衔接（`docs/notes/M29.md`） |
 | G38 保温杯 10 秒广告完整对话 | 通过（7/7，真实模型回放） | 从一句需求开始，3 轮后停在视频前：2 镜分镜、产品/主视觉锚图、第 1 镜首尾帧；0 次 `generate_video`（`docs/notes/M30.md`，HTML 在 `verification/video-conversation-2026-11-16/`） |
 | G39 普通用户版回放 | 通过（8/8，真实模型回放） | 用户只说“发抖音/竖着拍/早上上班/干净/没有照片”，Agent 自己补全 9:16、晨间通勤、adaptive 设定图；第 1 镜首尾帧；视频前停下；没有“和实物一致”的不当承诺（`docs/notes/M31.md`） |
-| G40 灵感搜索工具 | 契约通过（12/12，假 fetch；真实 key 待配） | Pexels 映射、主图、Authorization、`selection` 编号、2 组方向卡片、无 key 时不注册工具、401/空词错误；UI 可把选中图加入对话（`docs/notes/M32.md`） |
+| G40 灵感搜索工具 | 契约通过（12/12，假 fetch；真实 key 待配） | Pexels 映射、主图、Authorization、`selection` 编号、2 组方向卡片、无 key 时仍注册且调用失败标红、401/空词错误；UI 可把选中图加入对话（`docs/notes/M32.md`） |
 | G41 文字选图 | 通过（5/5，真实模型回放） | 用户只说“第 2 组第 2 张那种感觉”：不重搜图，`inputImages` 正是该 imageUrl，16:9 概念图，0 次视频；服务端用 `<last_inspiration>` 从消息 blocks 重建编号（`docs/notes/M32.md`） |
 | G42 素材库刷新持久化 | 通过（11/11，真实 Supabase/Storage/JWT） | 上传→重新 GET→Storage 对象→`/files/:id`→删除清理；非图片 400（`docs/notes/M33.md`） |
 | G43 角色图单镜头 image-to-video | 通过（5/5，真实模型行为探针） | 直接 `generate_video`，0 次生图/分镜；不说“先做角色设定图”；视频渠道缺失时如实报告（`docs/notes/M34.md`） |
 | G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 36/36） | `register_reference` 把用户图登记为 canon；`referenceDirect` 跳过关键帧/尾帧；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
 | G45 答完问题不止于文字分镜 | 通过（4/4，真实模型两轮） | 第二轮同轮 `create_storyboard` + `generate_image`；没有“确认后我就…”空承诺；结尾是明确问题（`docs/notes/M35.md`） |
 | G46 锚图确认后批量出全部分镜图 | 通过（7/7，真实模型 + 假方舟） | 两镜首尾帧同轮生成；只停一次给脚本方案；确认后直接进 `generate_video`，不重生成图（`docs/notes/M36.md`） |
+| G47 图片快捷加入对话 + 搜图失败可见 | 部分通过 | 搜图失败探针 5/5；所有聊天图片左上角快捷入口已实现，待浏览器手测（`docs/notes/M37.md`） |
 
 ## 当前失败/缺口
 

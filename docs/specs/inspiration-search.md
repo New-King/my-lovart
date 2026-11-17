@@ -36,13 +36,13 @@ Video_Remix_Benlai 的 `search_references` 启发了我们：当用户没有明�
 - `label` 是给用户看的中文方向名，`query` 是 Pexels 英文检索词；
 - 视频 9:16 用 `orientation: "portrait"`，横屏用 `landscape`；
 - 返回多个 `InspirationBlock`，前端已有卡片可预览、拖拽、点击“加入对话”；
-- 未配置 `PEXELS_API_KEY` 时，这个工具不会注册给模型，Agent 改用文字给方向，避免反复调用失败。
+- 未配置 `PEXELS_API_KEY` 时工具仍在；调用会返回 `invalid_config`，过程里显示红色失败卡片，Agent 说明不可用并改用文字给方向。只允许尝试一次，避免反复失败。
 
 ## UI 选择
 
 每张卡片有稳定的“组.张”编号（如 `2.3`），组标题写“第 2 组”，提示语：
 
-> 点缩略图右上角箭头加入对话；也可以回复“第 2 组第 1 张”。
+> 点缩略图左上角箭头加入对话；也可以回复“第 2 组第 1 张”。
 
 两条路径等价：
 

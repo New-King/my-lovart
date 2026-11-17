@@ -21,6 +21,7 @@
     "run:image-to-video-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-image-to-video-probe.mjs",
     "run:video-confirmation-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-video-confirmation-probe.mjs",
     "run:batch-preproduction-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-batch-preproduction-probe.mjs",
+    "run:inspiration-unavailable-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-inspiration-unavailable-probe.mjs",
     "trace:latest": "node ./scripts/trace-latest.mjs"
   },
   "dependencies": {

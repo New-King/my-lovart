@@ -1,9 +1,10 @@
 "use client";
 
-import { ImageOff, Loader2, X } from "lucide-react";
+import { ArrowDownRight, ImageOff, Loader2, X } from "lucide-react";
 import type { ImageAttachment } from "@/hooks/use-image-attachments";
 import type { ChatAttachment } from "@/lib/api";
 import { setChatImageDragData } from "@/lib/chat-canvas-drag";
+import { useToast } from "./ui/toast";
 
 function AttachmentBarItem({
   attachment,
@@ -79,35 +80,56 @@ export function AttachmentBar({
 export function MessageAttachments({
   attachments,
   onPreview,
+  onAddReference,
 }: {
   attachments: ChatAttachment[];
   onPreview: (attachment: ChatAttachment) => void;
+  onAddReference: (item: { url: string; name: string; mimeType: string }) => void;
 }) {
+  const toast = useToast();
+
   return (
     <div className="flex flex-wrap gap-1.5">
       {attachments.map((attachment) => (
-        <button
-          key={attachment.id}
-          type="button"
-          onClick={() => onPreview(attachment)}
-          aria-label={`查看 ${attachment.name}`}
-          className="group relative overflow-hidden rounded-lg border border-line"
-        >
-          <img
-            src={attachment.url}
-            alt={attachment.name}
-            title={attachment.name}
-            draggable
-            onDragStart={(event) =>
-              setChatImageDragData(event, {
+        <div key={attachment.id} className="group relative">
+          <button
+            type="button"
+            onClick={() => onPreview(attachment)}
+            aria-label={`查看 ${attachment.name}`}
+            className="block overflow-hidden rounded-lg border border-line"
+          >
+            <img
+              src={attachment.url}
+              alt={attachment.name}
+              title={attachment.name}
+              draggable
+              onDragStart={(event) =>
+                setChatImageDragData(event, {
+                  url: attachment.url,
+                  title: attachment.name,
+                  mimeType: attachment.mimeType,
+                })
+              }
+              className="size-20 cursor-grab object-cover transition-opacity group-hover:opacity-90 active:cursor-grabbing"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onAddReference({
                 url: attachment.url,
-                title: attachment.name,
+                name: attachment.name,
                 mimeType: attachment.mimeType,
-              })
-            }
-            className="size-20 cursor-grab object-cover transition-opacity group-hover:opacity-90 active:cursor-grabbing"
-          />
-        </button>
+              });
+              toast("success", "已加入对话框");
+            }}
+            aria-label={`把 ${attachment.name} 加入对话`}
+            title="加入对话"
+            className="absolute left-1 top-1 grid size-6 place-items-center rounded-full bg-ink/70 text-white opacity-0 shadow-sm backdrop-blur-sm transition-opacity hover:bg-ink group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100"
+          >
+            <ArrowDownRight className="size-3.5" strokeWidth={2} />
+          </button>
+        </div>
       ))}
     </div>
   );

@@ -11,7 +11,6 @@ import type {
 } from "@my-lovart/shared";
 import { z } from "zod";
 import type { ProjectAsset } from "../assets/assets.js";
-import { env } from "../../lib/env.js";
 import {
   fileDataUrlFromUrl,
   importFileBuffer,
@@ -1574,9 +1573,10 @@ export function createAgentTools(context: ToolContext) {
         }
 
         if (blocks.length === 0) {
+          const authFailure = failures.find((item) => item.startsWith("invalid_config"));
           return JSON.stringify({
-            error: failures[0] ?? "没有搜索到可用的灵感图，换一组具体视觉词再试",
-            code: "inspiration_empty",
+            error: authFailure ?? failures[0] ?? "没有搜索到可用的灵感图，换一组具体视觉词再试",
+            code: authFailure ? "invalid_config" : "inspiration_empty",
           });
         }
 
@@ -2167,10 +2167,7 @@ export function createAgentTools(context: ToolContext) {
     ),
   ];
 
-  // 没配 Pexels key 时不把工具交给模型：否则模型会反复调用并连续失败，打断对话。
-  return env.pexelsApiKey
-    ? tools
-    : tools.filter((item) => item.name !== "search_inspiration");
+  return tools;
 }
 
 type CanvasActionInput = z.infer<typeof canvasCommandSchema>;

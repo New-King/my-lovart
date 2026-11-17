@@ -70,19 +70,56 @@ function DownloadAction({ url, name }: { url: string; name: string }) {
   );
 }
 
+function AddToChatButton({
+  url,
+  name,
+  mimeType,
+  onAddReference,
+}: {
+  url: string;
+  name: string;
+  mimeType: string;
+  onAddReference: Props["onAddReference"];
+}) {
+  const toast = useToast();
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onAddReference({ url, name, mimeType });
+        toast("success", "已加入对话框");
+      }}
+      aria-label={`把 ${name} 加入对话`}
+      title="加入对话"
+      className="absolute left-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-full bg-ink/70 text-white opacity-0 shadow-sm backdrop-blur-sm transition-opacity hover:bg-ink group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100"
+    >
+      <ArrowDownRight className="size-3.5" strokeWidth={2} />
+    </button>
+  );
+}
+
 function ImageCard({
   block,
   onPreview,
   onAddToCanvas,
+  onAddReference,
 }: {
   block: ImageBlock;
   onPreview: Props["onPreview"];
   onAddToCanvas: Props["onAddToCanvas"];
+  onAddReference: Props["onAddReference"];
 }) {
   const label = block.prompt || "生成图像";
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-line bg-surface">
+    <figure className="group relative overflow-hidden rounded-xl border border-line bg-surface">
+      <AddToChatButton
+        url={block.url}
+        name={label}
+        mimeType={block.mimeType}
+        onAddReference={onAddReference}
+      />
       <button
         type="button"
         onClick={() => onPreview({ src: block.url, name: label })}
@@ -162,10 +199,12 @@ function CompactTile({
   block,
   onPreview,
   onAddToCanvas,
+  onAddReference,
 }: {
   block: MediaBlock;
   onPreview: Props["onPreview"];
   onAddToCanvas: Props["onAddToCanvas"];
+  onAddReference: Props["onAddReference"];
 }) {
   const label = block.prompt || (block.type === "video" ? "生成视频" : "生成图像");
   const preview = () =>
@@ -211,6 +250,15 @@ function CompactTile({
         </button>
       )}
 
+      {block.type === "image" && (
+        <AddToChatButton
+          url={block.url}
+          name={label}
+          mimeType={block.mimeType}
+          onAddReference={onAddReference}
+        />
+      )}
+
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end gap-0.5 bg-gradient-to-t from-ink/45 to-transparent p-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 max-sm:pointer-events-auto max-sm:opacity-100">
         {block.type === "image" && (
           <button
@@ -247,15 +295,22 @@ function ArtifactRow({
   items,
   onPreview,
   onAddToCanvas,
+  onAddReference,
 }: {
   items: MediaBlock[];
   onPreview: Props["onPreview"];
   onAddToCanvas: Props["onAddToCanvas"];
+  onAddReference: Props["onAddReference"];
 }) {
   if (items.length === 1) {
     const block = items[0]!;
     return block.type === "image" ? (
-      <ImageCard block={block} onPreview={onPreview} onAddToCanvas={onAddToCanvas} />
+      <ImageCard
+        block={block}
+        onPreview={onPreview}
+        onAddToCanvas={onAddToCanvas}
+        onAddReference={onAddReference}
+      />
     ) : (
       <VideoCard block={block} />
     );
@@ -269,6 +324,7 @@ function ArtifactRow({
           block={block}
           onPreview={onPreview}
           onAddToCanvas={onAddToCanvas}
+          onAddReference={onAddReference}
         />
       ))}
     </div>
@@ -301,7 +357,7 @@ function InspirationCard({
       <p className="mt-1.5 text-[12px] text-muted">{label}</p>
       {query ? <p className="mt-0.5 text-[10px] text-faint">{query}</p> : null}
       <p className="mt-1 text-[10.5px] text-faint">
-        点缩略图右上角箭头加入对话；也可以回复“第 {groupIndex} 组第 1 张”。
+        点缩略图左上角箭头加入对话；也可以回复“第 {groupIndex} 组第 1 张”。
       </p>
 
       <div className="mt-2.5 grid grid-cols-2 gap-2">
@@ -435,6 +491,7 @@ export function ChatBlocks({ blocks, onPreview, onAddToCanvas, onAddReference }:
             items={unit.items}
             onPreview={onPreview}
             onAddToCanvas={onAddToCanvas}
+            onAddReference={onAddReference}
           />
         );
       })}
