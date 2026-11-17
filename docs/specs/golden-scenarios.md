@@ -305,3 +305,10 @@
 - 例外：两镜角度差异极大、单张参考约束不住，或需要精确构图时，才关掉 referenceDirect 生成 keyframe
 - 禁止：忽略用户图、重新生成一版 canon；角色锚没有写入 `canon_asset_id` 导致 `canon_required`
 - 验收：`verify:video-guard` 35/35（角色 canon + referenceDirect 用例）
+
+## G45 答完问题后不能只给文字分镜
+
+- 上下文：用户答完 3 个需求问题（10 秒公路车广告 / 16:9 / 硬核速度感），没有实拍图
+- 期望：同轮 `create_storyboard` + `generate_image(role=canon)`（或 `register_reference`）；把分镜和设定图一起给用户；结尾明确问“这版可以吗/要不要换方式”
+- 禁止：只调用 `create_storyboard` 就结束；用“确认后我就生成设定图”这种陈述句收尾；承诺下一步却不执行
+- 验收：`run:video-confirmation-probe` 4/4（`docs/notes/M35.md`）

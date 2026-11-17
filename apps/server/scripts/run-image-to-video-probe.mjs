@@ -17,6 +17,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "";
 process.env.SUPABASE_DB_URL = "";
 process.env.GENERATION_MODE = "real";
 process.env.ARK_API_KEY = "";
+process.env.VOLCES_API_KEY = "";
 process.env.METASO_API_KEY = "";
 process.env.PEXELS_API_KEY = "";
 

@@ -52,6 +52,7 @@
 | G42 素材库刷新持久化 | 通过（11/11，真实 Supabase/Storage/JWT） | 上传→重新 GET→Storage 对象→`/files/:id`→删除清理；非图片 400（`docs/notes/M33.md`） |
 | G43 角色图单镜头 image-to-video | 通过（5/5，真实模型行为探针） | 直接 `generate_video`，0 次生图/分镜；不说“先做角色设定图”；视频渠道缺失时如实报告（`docs/notes/M34.md`） |
 | G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 35/35） | `register_reference` 把用户图登记为 canon；`referenceDirect` 跳过关键帧/尾帧；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
+| G45 答完问题不止于文字分镜 | 通过（4/4，真实模型两轮） | 第二轮同轮 `create_storyboard` + `generate_image`；没有“确认后我就…”空承诺；结尾是明确问题（`docs/notes/M35.md`） |
 
 ## 当前失败/缺口
 

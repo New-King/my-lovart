@@ -19,6 +19,7 @@
     "run:video-conversation": "pnpm build && node --env-file=../../.env.local ./scripts/run-video-conversation.mjs",
     "run:inspiration-conversation": "pnpm build && node --env-file=../../.env.local ./scripts/run-inspiration-conversation.mjs",
     "run:image-to-video-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-image-to-video-probe.mjs",
+    "run:video-confirmation-probe": "pnpm build && node --env-file=../../.env.local ./scripts/run-video-confirmation-probe.mjs",
     "trace:latest": "node ./scripts/trace-latest.mjs"
   },
   "dependencies": {
