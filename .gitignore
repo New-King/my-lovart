@@ -13,3 +13,6 @@ dist/
 # 本地运行 trace（每次 run 一个 JSONL）
 .traces/
 verification/
+
+# 本地素材：截图、录屏等，不进仓库
+media/

@@ -329,3 +329,11 @@
 - 期望：过程里出现 `search_inspiration` 工具行并标红（`invalid_config`）；只尝试一次；回复说明搜图不可用并给文字方向/提问卡
 - 禁止：图片没有快捷入口；搜图没调用却写“用不上”；失败不显示；反复重试
 - 验收：`run:inspiration-unavailable-probe` 5/5（`docs/notes/M37.md`）；图片入口需浏览器手测
+
+## G48 过程区显示模型思考
+
+- 上下文：模型在一次回合里返回 `reasoning_content`（DeepSeek 等推理模型）
+- 期望：每段思考以一行截断摘要出现在**对应工具调用上方**；默认折叠，点开可看完整思考；思考随消息持久化，刷新后仍在
+- 禁止：把思考当最终回答混进消息正文；工具已经执行完才补一个空思考行；思考行不可展开；模型没返回 reasoning 时凭空编造思考
+- 边界：单段最多保留 60,000 字符，超出截断并明确标注；模型不返回 reasoning 时整个思考行不出现，不报错
+- 验收：`verify:reasoning` 6/6（chunk 形状契约）；`run:reasoning-probe` 在有思维链的模型上 9/9，无 reasoning 时 SKIP（`docs/notes/M38.md`）

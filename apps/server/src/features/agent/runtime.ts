@@ -463,6 +463,8 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
   let answerText = "";
   let deliveredArtifact = false;
   let activeTool: { toolCallId: string } | null = null;
+  // 一次模型回合 = 一段思考：第一段 reasoning 到达时开，正文/工具调用到达时关。
+  let activeThought: { id: string; chars: number; startedAt: string } | null = null;
 
   try {
     const stream = agent.streamEvents(
@@ -479,6 +481,10 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
     for await (const item of mergeWithBus(stream, bus)) {
       if (input.signal.aborted) {
         input.trace?.event("run.canceled", { answer: answerText.slice(-2000) });
+        if (activeThought) {
+          yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+          activeThought = null;
+        }
         yield emit({ type: "run.canceled" });
         return;
       }
@@ -501,9 +507,46 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
         const chunk = event.data?.chunk;
         if (!chunk) continue;
 
-        // 推理模型的原始 chain-of-thought 不直接展示给用户；
-        // 用户能看到的是模型自己写给用户的计划与结果说明。
+        // DeepSeek 等推理模型会在 delta.reasoning_content 里持续给出思考。
+        // 按一次模型回合切成一段 Thought：第一段 reasoning 开始，正文/工具调用结束。
+        const reasoning = readChunkReasoning(chunk);
+        if (reasoning) {
+          if (!activeThought) {
+            activeThought = {
+              id: randomUUID(),
+              chars: 0,
+              startedAt: new Date().toISOString(),
+            };
+            yield emit({
+              type: "thinking.started",
+              thoughtId: activeThought.id,
+              startedAt: activeThought.startedAt,
+            });
+          }
+
+          const room = MAX_THOUGHT_CHARS - activeThought.chars;
+          if (room > 0) {
+            const delta = reasoning.slice(0, room);
+            activeThought.chars += delta.length;
+            yield emit({ type: "thinking.delta", thoughtId: activeThought.id, delta });
+            if (reasoning.length > room) {
+              yield emit({
+                type: "thinking.delta",
+                thoughtId: activeThought.id,
+                delta: "\n\n…（这段思考过长，已截断）",
+              });
+            }
+          }
+
+          if (!readChunkText(chunk) && !chunkHasToolCalls(chunk)) continue;
+        }
+
         const text = readChunkText(chunk);
+        if ((text || chunkHasToolCalls(chunk)) && activeThought) {
+          yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+          activeThought = null;
+        }
+
         if (text) {
           answerText += text;
           yield emit({ type: "message.delta", delta: text });
@@ -511,7 +554,19 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
         continue;
       }
 
+      if (event.event === "on_chat_model_end") {
+        if (activeThought) {
+          yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+          activeThought = null;
+        }
+        continue;
+      }
+
       if (event.event === "on_tool_start") {
+        if (activeThought) {
+          yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+          activeThought = null;
+        }
         const name = event.name ?? "";
         input.trace?.event("tool.start", { name, input: event.data?.input });
         if (!isKnownTool(name)) continue;
@@ -733,13 +788,25 @@ export async function* runAgent(input: AgentRunInput): AsyncGenerator<RunEvent> 
 
     if (input.signal.aborted) {
       input.trace?.event("run.canceled", { answer: answerText.slice(-2000) });
+      if (activeThought) {
+        yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+        activeThought = null;
+      }
       yield emit({ type: "run.canceled" });
       return;
     }
 
+    if (activeThought) {
+      yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+      activeThought = null;
+    }
     input.trace?.event("run.completed", { answer: answerText.slice(-4000) });
     yield emit({ type: "run.completed" });
   } catch (error) {
+    if (activeThought) {
+      yield emit({ type: "thinking.completed", thoughtId: activeThought.id });
+      activeThought = null;
+    }
     if (input.signal.aborted) {
       yield emit({ type: "run.canceled" });
       return;
@@ -925,6 +992,40 @@ function buildHumanMessage(text: string, images: string[]): HumanMessage {
       })),
     ],
   });
+}
+
+/** 单段思考最多保留的字符数；防止异常模型一次吐出几十万字符。 */
+const MAX_THOUGHT_CHARS = 60_000;
+
+export function readChunkReasoning(chunk: unknown): string {
+  if (typeof chunk !== "object" || chunk === null) return "";
+
+  const additional = (chunk as { additional_kwargs?: { reasoning_content?: unknown } })
+    .additional_kwargs;
+  if (typeof additional?.reasoning_content === "string") {
+    return additional.reasoning_content;
+  }
+
+  const content = (chunk as { content?: unknown }).content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((part) => {
+      if (typeof part !== "object" || part === null) return "";
+      const type = (part as { type?: unknown }).type;
+      if (type !== "thinking" && type !== "reasoning") return "";
+      const value = part as { thinking?: unknown; reasoning?: unknown; text?: unknown };
+      if (typeof value.thinking === "string") return value.thinking;
+      if (typeof value.reasoning === "string") return value.reasoning;
+      return typeof value.text === "string" ? value.text : "";
+    })
+    .join("");
+}
+
+export function chunkHasToolCalls(chunk: unknown): boolean {
+  if (typeof chunk !== "object" || chunk === null) return false;
+  const message = chunk as { tool_calls?: unknown[]; tool_call_chunks?: unknown[] };
+  return (message.tool_calls?.length ?? 0) > 0 || (message.tool_call_chunks?.length ?? 0) > 0;
 }
 
 function readChunkText(chunk: unknown): string {

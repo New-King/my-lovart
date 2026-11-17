@@ -91,8 +91,15 @@ type Entry =
   | { kind: "thought"; id: string; at: string; thought: Thought }
   | { kind: "tool"; id: string; at: string; tool: ToolBlock };
 
+function thoughtPreview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 120 ? `${flat.slice(0, 120)}…` : flat;
+}
+
 function ThoughtRow({ thought, now }: { thought: Thought; now: number }) {
   const [expanded, setExpanded] = useState(false);
+  const live = !thought.finishedAt;
+  const preview = thoughtPreview(thought.text);
 
   return (
     <div>
@@ -103,19 +110,26 @@ function ThoughtRow({ thought, now }: { thought: Thought; now: number }) {
         className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-muted transition-colors hover:text-ink"
       >
         <Lightbulb className="size-3 shrink-0 text-faint" strokeWidth={1.75} />
-        <span className="shrink-0">思考过程</span>
-        <span className="shrink-0 text-faint">
-          · {formatDuration(thought.startedAt, thought.finishedAt, now)}
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-faint",
+            live && preview && "thinking-shimmer",
+          )}
+        >
+          {preview || (live ? "思考中…" : "—")}
+        </span>
+        <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-faint">
+          {formatDuration(thought.startedAt, thought.finishedAt, now)}
         </span>
         <ChevronDown
-          className={`ml-auto size-3 shrink-0 text-faint transition-transform ${
+          className={`size-3 shrink-0 text-faint transition-transform ${
             expanded ? "" : "-rotate-90"
           }`}
           strokeWidth={1.75}
         />
       </button>
       {expanded && (
-        <p className="mb-2 ml-5 whitespace-pre-wrap text-[11px] leading-relaxed text-muted">
+        <p className="mb-2 ml-5 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted">
           {thought.text || "—"}
         </p>
       )}
