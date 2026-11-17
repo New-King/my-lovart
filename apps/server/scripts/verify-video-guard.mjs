@@ -377,6 +377,28 @@ try {
     negativeState.error?.code ?? "allowed",
   );
 
+  const actionNoActor = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot.id,
+    prompt: "公路竞速车从画面前方远处高速压弯逼近镜头，车身内倾",
+  });
+  check(
+    "压弯动作没有骑手/人物时拒绝关键帧",
+    actionNoActor.error?.code === "action_actor_required",
+    actionNoActor.error?.code ?? "allowed",
+  );
+
+  const actionWithActor = await planImageReferences(baseContext(new Date().toISOString()), {
+    role: "keyframe",
+    shotId: shot.id,
+    prompt: "骑手压低身体，公路竞速车在弯道压弯逼近镜头",
+  });
+  check(
+    "写清骑手和压弯姿态后放行关键帧",
+    !actionWithActor.error,
+    actionWithActor.error?.code ?? "allowed",
+  );
+
   const detailId = randomUUID();
   await (await getAssetsRepository()).save(projectId, {
     id: detailId,
@@ -593,6 +615,30 @@ try {
     createdAt: tenMinutesAgo,
   });
   await repo.applyFirstFrame(projectId, shot1.id, first1);
+
+  const actionVideo = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    shot1.id,
+    false,
+    "公路竞速车从画面深处高速压弯向镜头逼近，车身内倾",
+  );
+  check(
+    "视频要求压弯但首帧/分镜没有骑手时拒绝出片",
+    actionVideo?.code === "action_actor_required",
+    actionVideo?.code ?? "allowed",
+  );
+
+  const actionVideoDirect = await checkVideoPreflight(
+    baseContext(new Date().toISOString()),
+    shot1.id,
+    true,
+    "公路竞速车从画面深处高速压弯向镜头逼近，车身内倾",
+  );
+  check(
+    "direct=true 也不能绕过动作主体检查",
+    actionVideoDirect?.code === "action_actor_required",
+    actionVideoDirect?.code ?? "allowed",
+  );
 
   const missingEnd = await checkVideoPreflight(
     baseContext(new Date().toISOString()),

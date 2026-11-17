@@ -8,8 +8,6 @@ import type {
 } from "@my-lovart/shared";
 import { ArrowDown, Copy, Frame, Loader2, Menu, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   getHealth,
   type ChatAttachment,
@@ -21,6 +19,7 @@ import { MessageAttachments } from "./chat-attachments";
 import { ChatBlocks } from "./chat-blocks";
 import { ChatComposer, type ChatComposerHandle } from "./chat-composer";
 import { ChatEmptyState } from "./chat-empty-state";
+import { ChatMarkdown } from "./chat-markdown";
 import { ClarificationCard } from "./clarification-card";
 import { ImageLightbox } from "./image-lightbox";
 import { MediaSkeleton } from "./media-skeleton";
@@ -388,9 +387,7 @@ export function ChatPanel({
                                 unit.cursor ? "prose-streaming" : ""
                               }`}
                             >
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {unit.text}
-                              </ReactMarkdown>
+                              <ChatMarkdown text={unit.text} />
                             </div>
                           ) : (
                             <ChatBlocks
@@ -413,9 +410,7 @@ export function ChatPanel({
                               message.status === "streaming" ? "prose-streaming" : ""
                             }`}
                           >
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {message.content}
-                            </ReactMarkdown>
+                            <ChatMarkdown text={message.content} />
                           </div>
                         )}
 

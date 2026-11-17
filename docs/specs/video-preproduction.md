@@ -44,6 +44,18 @@
 
 `referenceDirect=true` 是分镜级开关：preflight 跳过 `keyframe_required` / `keyframe_not_anchored` / `end_frame_required`，但仍要求 canon 和上一镜视频；出片时服务端自动选参考图——第一镜用 canon 用户图，后续镜用上一镜 `video_last_frame_asset_id`，保证身份和剪辑点，不额外生成关键帧。
 
+## 动作主体与首帧一致性
+
+图生视频只能从**首帧里已经存在的主体和姿态**往下动，不能指望模型补出一个执行动作的人。
+
+- 压弯、骑行、摇车、踩踏、起身、奔跑、挥手等动作，必须由首帧里的骑手/人物执行；无人物产品设定图只锁车型/配色/材质，不能直接当动作镜头首帧。
+- `generate_image(role=keyframe)` 的 prompt 出现这些动作但没有写骑手/人物时，返回 `action_actor_required`，要求先补“骑手压低身体压弯”这类动作首帧。
+- 视频 prompt 也做同样检查，且 `direct=true` 不能绕过；`referenceDirect=true` 或用户上传图例外（图里可能本来就有主体）。
+- 视频 prompt 必须以首帧的可见状态为起点：首帧主车在近景就写“画面近景的主车开始…”，不要写“从画面深处驶来”，否则模型会去动背景里的第二个骑手。
+- 纯产品运镜（环绕、推近、光影扫过、轮组转动）不需要人物，不受这条限制。
+
+失败样本（2026-11-17）：公路车广告第 1 镜首帧是“前景静止整车 + 远处一个骑手”，视频 prompt 写“公路车从画面深处高速压弯逼近”。图生视频把远处骑手动了起来，前景产品车不动，成片变成“路人骑过一辆停着的车”。修复不是改一句文案，而是首帧必须包含骑手和压弯姿态，且视频 prompt 只能描述这个首帧主体的运动。
+
 ## 画幅锁定
 
 `create_storyboard(kind=video)` 必须传 `aspectRatio`；没有就返回 `aspect_ratio_required`。`generate_image` 生成 canon / keyframe / end_frame 时优先使用分镜的 `aspectRatio`，不再让模型随手传的默认 3:4 覆盖 16:9 或 9:16 的片子。当前 run 里已经生成过的旧 3:4 canon 不会被追溯修改；重做时按新规则生成。

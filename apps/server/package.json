@@ -16,6 +16,7 @@
     "verify:generation-config": "pnpm build && node --env-file=../../.env.local ./scripts/verify-generation-config.mjs",
     "verify:inspiration": "pnpm build && node --env-file=../../.env.local ./scripts/verify-inspiration.mjs",
     "verify:reasoning": "pnpm build && node --env-file=../../.env.local ./scripts/verify-reasoning.mjs",
+    "verify:action-guard": "pnpm build && node --env-file=../../.env.local ./scripts/verify-action-guard.mjs",
     "verify:materials": "pnpm build && node --env-file=../../.env.local ./scripts/verify-materials.mjs",
     "run:video-conversation": "pnpm build && node --env-file=../../.env.local ./scripts/run-video-conversation.mjs",
     "run:inspiration-conversation": "pnpm build && node --env-file=../../.env.local ./scripts/run-inspiration-conversation.mjs",

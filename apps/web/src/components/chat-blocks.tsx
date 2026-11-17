@@ -15,10 +15,9 @@ import {
   Play,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { guessMimeTypeFromUrl, setChatImageDragData } from "@/lib/chat-canvas-drag";
 import { downloadAsset } from "@/lib/download";
+import { ChatMarkdown } from "./chat-markdown";
 import { useToast } from "./ui/toast";
 
 export type PreviewTarget = { src: string; name: string };
@@ -422,7 +421,7 @@ function InspirationCard({
 function TextBlockView({ text }: { text: string }) {
   return (
     <div className="prose-muse text-[13.5px] leading-[1.7] text-ink">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ChatMarkdown text={text} />
     </div>
   );
 }

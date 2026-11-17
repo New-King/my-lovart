@@ -216,6 +216,58 @@
     color: var(--color-accent);
     text-decoration: underline;
   }
+
+  /* GFM 表格：列多时横向滚动，不再把每列挤成一条竖线 */
+  .prose-muse .md-table-wrap {
+    margin: 0.7em 0;
+    overflow-x: auto;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: var(--color-surface);
+  }
+
+  .prose-muse .md-table-wrap table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .prose-muse .md-table-wrap th,
+  .prose-muse .md-table-wrap td {
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+    border-right: 1px solid var(--color-line);
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .prose-muse .md-table-wrap th {
+    background: #fafafa;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .prose-muse .md-table-wrap td {
+    min-width: 64px;
+    word-break: break-word;
+  }
+
+  .prose-muse .md-table-wrap tr > :last-child {
+    border-right: 0;
+  }
+
+  .prose-muse .md-table-wrap tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  .prose-muse blockquote {
+    margin: 0.7em 0;
+    border-left: 2px solid var(--color-line);
+    padding-left: 10px;
+    color: var(--color-muted);
+  }
 }
 
 @keyframes media-shimmer {

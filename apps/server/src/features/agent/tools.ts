@@ -479,6 +479,48 @@ export function promptRequiresProductDetail(text: string): boolean {
 }
 
 /**
+ * 哪些词意味着镜头里有“人/骑手在完成动作”。
+ * 单独的“高速/掠过”可能只是镜头运动，所以车辆位移要求“车型 + 驶入/冲来”同句出现。
+ */
+const HUMAN_ACTION =
+  /压弯|骑行|骑手|车手|摇车|踩踏|蹬踏|起身|站起|站起来|奔跑|跑步|跳跃|跳起|行走|走路|挥手|转身|弯腰|俯身|伸手/;
+const VEHICLE_MOVE =
+  /(公路车|自行车|单车|竞速车)[^。；;\n]{0,24}(驶入|冲来|冲进|高速切入)/;
+const ACTOR = /骑手|车手|运动员|人物|主角|角色|模特|行人|男人|女人|少年|女孩|男孩|骑行者/;
+
+export function promptRequiresHumanAction(text: string): boolean {
+  const negative = /不|禁止|无|没有|避免|不得|勿/;
+  for (const sentence of text.split(/[。；;\n]/)) {
+    const match = sentence.match(HUMAN_ACTION) ?? sentence.match(VEHICLE_MOVE);
+    if (!match || match.index === undefined) continue;
+    if (negative.test(sentence.slice(0, match.index))) continue;
+    return true;
+  }
+  return false;
+}
+
+/** 文本里是否明确有执行动作的主体；否定句“不要人物/无骑手”不算。 */
+export function promptMentionsActor(text: string): boolean {
+  for (const sentence of text.split(/[。；;\n]/)) {
+    const match = sentence.match(ACTOR);
+    if (!match || match.index === undefined) continue;
+    if (/不|禁止|无|没有|避免|不得|勿/.test(sentence.slice(0, match.index))) continue;
+    return true;
+  }
+  return false;
+}
+
+export function actionActorError(text: string): Record<string, unknown> | null {
+  if (!promptRequiresHumanAction(text) || promptMentionsActor(text)) return null;
+  return {
+    error:
+      "这一镜写的是压弯/骑行/驶入等由人完成的动作，但文字里没有骑手或人物。静态产品设定图不能直接当动作镜头首帧，否则模型会去动背景里另一个骑手，主角就错了。请在关键帧 prompt 里写清“骑手压低身体压弯/踩踏”，让首帧包含这个人物和动作姿态；如果只想展示产品，就改成环绕、推近、光影扫过这类纯产品运镜。",
+    code: "action_actor_required",
+    next: "把动作主体写进关键帧 prompt（骑手/车手 + 姿态）→ 重新生成 keyframe；或改成不需要人物的产品运镜",
+  };
+}
+
+/**
  * 图片生成的参考图计划：
  * - canon：产品/角色/场景/主视觉锚图，可引用用户上传的产品图；
  * - keyframe：自动引用该分镜全部锚图，并承接上一镜头尾帧；
@@ -697,6 +739,19 @@ export async function planImageReferences(
     found.shot.prompt,
     input.prompt,
   ].join(" ");
+  if (role === "keyframe") {
+    const actionError = actionActorError(stateText);
+    if (actionError) {
+      return {
+        role,
+        references: explicit,
+        sourceAssetIds: [],
+        shotId: input.shotId,
+        policy,
+        error: actionError,
+      };
+    }
+  }
   const needsProductDetail = promptRequiresProductDetail(stateText);
   if (
     policy !== "loose" &&
@@ -933,9 +988,10 @@ export async function checkVideoPreflight(
   context: ToolContext,
   shotId: string | undefined,
   direct: boolean,
+  prompt = "",
 ): Promise<Record<string, unknown> | null> {
-  if (direct) return null;
   if (!shotId) {
+    if (direct) return null;
     return {
       error:
         "视频不能直接生成。先写 1 个镜头的脚本（或分镜），生成首帧关键图，让用户确认脚本和画面后再生成视频。",
@@ -951,6 +1007,30 @@ export async function checkVideoPreflight(
   const policy = readConsistencyPolicy(found.storyboard);
   // 已有用户参考图且角度常规时，允许逐镜直接拿参考图出片，不强制先做关键帧。
   const referenceDirect = found.storyboard.metadata?.referenceDirect === true;
+  const firstFrameId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
+  let keyframe: ProjectAsset | null = null;
+  if (firstFrameId) {
+    keyframe = await (await getAssetsRepository()).get(context.projectId, firstFrameId);
+  }
+  const frame = keyframe && keyframe.kind === "image" ? keyframe : null;
+  const frameIsUserImage = Boolean(
+    frame && (frame.origin === "uploaded" || context.attachmentMap[frame.id]),
+  );
+  if (!referenceDirect && !frameIsUserImage) {
+    const actionText = [
+      found.shot.title,
+      found.shot.description,
+      found.shot.prompt,
+      frame?.prompt ?? "",
+      prompt,
+    ].join(" ");
+    const actionError = actionActorError(actionText);
+    if (actionError) {
+      return { ...actionError, shot_id: found.shot.id };
+    }
+  }
+  if (direct) return null;
+
   const createdAt = new Date(found.shot.createdAt).getTime();
   const runStartedAt = new Date(context.runStartedAt).getTime();
   if (Number.isFinite(createdAt) && createdAt >= runStartedAt - 2000) {
@@ -971,12 +1051,6 @@ export async function checkVideoPreflight(
       next: "register_reference(用户图) 或 generate_image(role=canon) → 再出片",
     };
   }
-  const firstFrameId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
-  let keyframe: ProjectAsset | null = null;
-  if (firstFrameId) {
-    keyframe = await (await getAssetsRepository()).get(context.projectId, firstFrameId);
-  }
-  const frame = keyframe && keyframe.kind === "image" ? keyframe : null;
   if (!frame && policy !== "loose" && !referenceDirect) {
     return {
       error:
@@ -1245,7 +1319,7 @@ export function createAgentTools(context: ToolContext) {
       {
         name: "generate_image",
         description:
-          "生成一张图片。视频前期：role=canon+anchorType=product 在有实拍时必须以实拍为参考；strict 策略缺实拍会被拒，adaptive/loose 可先生成设定图。product_detail 用于开盖/螺纹/内胆等状态；strict 必须有对应实拍，adaptive 可基于产品锚图生成草案。关键帧 role=keyframe/end_frame 会自动引用产品锚/细节锚/衔接帧，并追加身份锁定。普通画图不传 role。",
+          "生成一张图片。视频前期：role=canon+anchorType=product 在有实拍时必须以实拍为参考；strict 策略缺实拍会被拒，adaptive/loose 可先生成设定图。product_detail 用于开盖/螺纹/内胆等状态；strict 必须有对应实拍，adaptive 可基于产品锚图生成草案。关键帧 role=keyframe/end_frame 会自动引用产品锚/细节锚/衔接帧，并追加身份锁定。关键帧里出现压弯/骑行/摇车/起身等人物动作时，prompt 必须写清骑手/人物和动作姿态，否则会被 action_actor_required 拒绝。普通画图不传 role。",
         schema: imageSchema,
       },
     ),
@@ -1270,6 +1344,7 @@ export function createAgentTools(context: ToolContext) {
           context,
           input.shotId,
           direct,
+          input.prompt,
         );
         if (preflight) return JSON.stringify(preflight);
 
