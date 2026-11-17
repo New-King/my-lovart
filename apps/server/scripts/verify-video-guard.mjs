@@ -145,6 +145,20 @@ try {
     registered.error ?? registered.asset_id ?? "no asset",
   );
 
+  await repo.updateStoryboard(projectId, referenceBoard.storyboard.id, {
+    metadata: { referenceDirect: true },
+  });
+  const referenceDirectPreflight = await checkVideoPreflight(
+    baseContext(new Date(Date.now() + 5000).toISOString()),
+    referenceBoard.shots[0].id,
+    false,
+  );
+  check(
+    "referenceDirect：有用户 canon 时不需要先生成关键帧",
+    referenceDirectPreflight === null,
+    referenceDirectPreflight?.code ?? "allowed",
+  );
+
   // image-to-video 的 direct 许可：有主体图才允许，否则要用户原话显式授权
   const directWithSource = checkDirectVideoInput({
     direct: true,

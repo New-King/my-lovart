@@ -314,6 +314,13 @@ const createStoryboardSchema = z.object({
     .describe(
       "一致性策略。strict=客户有产品实拍/明确要求不能变形，锚图必须有真实参考、多镜头必须末帧衔接；adaptive=有实拍用实拍，没有则生成设定图并标注（默认）；loose=快速草稿，允许无锚图、不强制末帧衔接",
     ),
+  referenceDirect: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "true=已有可用参考图，逐镜直接用参考图出片，不先生成关键帧；常规角度/同一主体的多镜头短片用。角度差异大或需要精确构图时才设 false 走关键帧",
+    ),
   shots: z.array(shotInputSchema).min(1).max(12),
 });
 
@@ -332,6 +339,10 @@ const updateStoryboardSchema = z.object({
     .enum(["strict", "adaptive", "loose"])
     .optional()
     .describe("切换一致性策略；只改这一项时不影响其他 metadata"),
+  referenceDirect: z
+    .boolean()
+    .optional()
+    .describe("切换“直接拿参考图逐镜出片、不生成关键帧”的模式"),
 });
 
 const updateShotSchema = z.object({
@@ -948,6 +959,8 @@ export async function checkVideoPreflight(
     return { error: "找不到这个镜头，不能生成视频", code: "invalid_shot" };
   }
   const policy = readConsistencyPolicy(found.storyboard);
+  // 已有用户参考图且角度常规时，允许逐镜直接拿参考图出片，不强制先做关键帧。
+  const referenceDirect = found.storyboard.metadata?.referenceDirect === true;
   const createdAt = new Date(found.shot.createdAt).getTime();
   const runStartedAt = new Date(context.runStartedAt).getTime();
   if (Number.isFinite(createdAt) && createdAt >= runStartedAt - 2000) {
@@ -961,11 +974,11 @@ export async function checkVideoPreflight(
   if (!found.storyboard.canonAssetId && policy !== "loose") {
     return {
       error:
-        "这个视频分镜还没有产品/角色设定图（canon）。先生成并确认设定图（adaptive 允许没有实拍时先生成设定图；loose 可跳过），所有镜头都基于它，否则每个镜头会各自长成不同产品。",
+        "这个视频分镜还没有身份基准（canon）。用户给了角色/产品参考图就用 register_reference 直接登记；没有参考图才按 consistency 生成设定图。所有镜头都基于它，否则每个镜头会各自长成不同主体。",
       code: "canon_required",
       shot_id: found.shot.id,
       policy,
-      next: "generate_image(role=canon) → update_storyboard(canonAssetId) → generate_image(shotId, role=keyframe)",
+      next: "register_reference(用户图) 或 generate_image(role=canon) → 再出片",
     };
   }
   const firstFrameId = found.shot.firstFrameAssetId ?? found.shot.activeAssetId;
@@ -974,7 +987,7 @@ export async function checkVideoPreflight(
     keyframe = await (await getAssetsRepository()).get(context.projectId, firstFrameId);
   }
   const frame = keyframe && keyframe.kind === "image" ? keyframe : null;
-  if (!frame && policy !== "loose") {
+  if (!frame && policy !== "loose" && !referenceDirect) {
     return {
       error:
         "这个镜头还没有首帧关键图。先用 generate_image(shotId, role=keyframe) 生成一张基于 canon 的关键画面，展示给用户确认，再生成视频。",
@@ -986,6 +999,7 @@ export async function checkVideoPreflight(
   const canonId = found.storyboard.canonAssetId ?? "";
   if (
     policy !== "loose" &&
+    !referenceDirect &&
     frame &&
     (frame.metadata?.role !== "keyframe" ||
       !frame.sourceAssetIds.includes(canonId))
@@ -1025,7 +1039,7 @@ export async function checkVideoPreflight(
       const anchored =
         firstFrameId === continuityId ||
         (frame?.sourceAssetIds.includes(continuityId) ?? false);
-      if (!anchored) {
+      if (!anchored && !referenceDirect) {
         return {
           error:
             "这一镜首帧没有承接上一镜的实际末帧，剪辑点会跳。重新用 generate_image(shotId, role=keyframe) 出首帧，服务端会自动把上一镜末帧作为参考。",
@@ -1035,7 +1049,7 @@ export async function checkVideoPreflight(
       }
     }
 
-    if (index >= 0 && index < lastIndex && !found.shot.endFrameAssetId) {
+    if (index >= 0 && index < lastIndex && !found.shot.endFrameAssetId && !referenceDirect) {
       return {
         error:
           "多镜头分镜里，每个非收尾镜头都要有尾帧，才能和下一镜接上。先生成这一镜的 end_frame。",
@@ -1316,6 +1330,27 @@ export function createAgentTools(context: ToolContext) {
               if (end?.kind === "image") {
                 frames.push((await fileDataUrlFromUrl(end.url)) ?? end.url);
                 sourceAssetIds.push(end.id);
+              }
+            }
+            // referenceDirect：没有关键帧时，第一镜用 canon 参考图，
+            // 后续镜用上一镜实际末帧，保证身份和画面承接，但不额外生成关键帧。
+            if (found.storyboard.metadata?.referenceDirect === true && frames.length === 0) {
+              const repo = await getStoryboardsRepository();
+              const detail = await repo.get(context.projectId, found.storyboard.id);
+              const ordered = detail ? activeShots(detail) : [];
+              const index = ordered.findIndex((item) => item.id === found.shot.id);
+              const previous = index > 0 ? ordered[index - 1] : undefined;
+              const sourceId =
+                previous?.videoLastFrameAssetId ?? found.storyboard.canonAssetId ?? "";
+              if (sourceId) {
+                const source = await (await getAssetsRepository()).get(
+                  context.projectId,
+                  sourceId,
+                );
+                if (source?.kind === "image") {
+                  frames.push((await fileDataUrlFromUrl(source.url)) ?? source.url);
+                  sourceAssetIds.unshift(source.id);
+                }
               }
             }
             if (frames.length > 0) referenceImages = frames.slice(0, 2);
@@ -1860,7 +1895,10 @@ export function createAgentTools(context: ToolContext) {
             ...(input.totalDurationSeconds
               ? { totalDurationSeconds: input.totalDurationSeconds }
               : {}),
-            metadata: { consistency: input.consistency },
+            metadata: {
+              consistency: input.consistency,
+              ...(input.referenceDirect ? { referenceDirect: true } : {}),
+            },
             shots: input.shots,
           });
           return JSON.stringify({
@@ -1870,6 +1908,7 @@ export function createAgentTools(context: ToolContext) {
             total_duration_seconds: detail.storyboard.totalDurationSeconds,
             canon_asset_id: detail.storyboard.canonAssetId,
             consistency: readConsistencyPolicy(detail.storyboard),
+            reference_direct: detail.storyboard.metadata?.referenceDirect === true,
             consistency_description: policyDescription(
               readConsistencyPolicy(detail.storyboard),
             ),
@@ -1896,11 +1935,17 @@ export function createAgentTools(context: ToolContext) {
     tool(
       async (input) => {
         try {
-          const { storyboardId, canonAssetId, consistency, ...patch } = input;
+          const { storyboardId, canonAssetId, consistency, referenceDirect, ...patch } = input;
           const repo = await getStoryboardsRepository();
+          const mergedMetadata = {
+            ...(consistency ? { consistency } : {}),
+            ...(referenceDirect !== undefined ? { referenceDirect } : {}),
+          };
           const detail = await repo.updateStoryboard(context.projectId, storyboardId, {
             ...patch,
-            ...(consistency ? { metadata: { consistency } } : {}),
+            ...(Object.keys(mergedMetadata).length > 0
+              ? { metadata: mergedMetadata }
+              : {}),
           });
           const storyboard =
             canonAssetId !== undefined

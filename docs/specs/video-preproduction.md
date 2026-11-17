@@ -35,12 +35,14 @@
 | 场景 | 做法 | 不做什么 |
 | --- | --- | --- |
 | A 单镜头/单动作 + 已有主体图 | `generate_video({ inputImages:[那张图], durationSeconds, prompt, direct:true })`，直接 image-to-video | 不生成角色/产品设定图，不出首尾帧，不建分镜 |
-| B 多镜头 + 已有主体参考图 | 建 `kind=video` 分镜；`register_reference(assetId, storyboardId, anchorType)` 把用户图登记为 canon；关键帧以它为参考 | 不再生成“一版角色设定图”；除非现有图角度/细节不足且说明原因 |
+| B 多镜头 + 已有主体参考图 | 建 `kind=video` 分镜，`referenceDirect=true`；`register_reference(assetId, storyboardId, anchorType)` 把用户图登记为 canon；每镜 `generate_video(shotId, inputImages:[参考图])`；第一镜用参考图，后续镜服务端自动用上一镜实际末帧作首帧 | 默认不生成关键帧，更不生成角色设定图；只有角度差异极大/需要精确构图时才 `referenceDirect=false` 走 keyframe |
 | C 多镜头 + 没有参考图 | 按 consistency 生成一次 canon（产品/角色/场景按 brief），确认后逐镜 keyframe | 不固定生成四张锚图 |
 | D 纯文字单镜头、没有图 | 建 1 镜分镜 + 首帧给用户确认；用户原话允许时可以 direct | 不假装已有参考图 |
 | E 用户要脚本/分镜/概念探索 | 先文字/分镜，不急着出图/出片 | 不把“要视频”当成“确认了画面” |
 
 `direct=true` 的许可由服务端判定（`checkDirectVideoInput`）：有主体图做单条 image-to-video，或用户原话明确“直接出片/不用确认”；两者都没有时拒绝，避免模型偷懒跳过整个前期。
+
+`referenceDirect=true` 是分镜级开关：preflight 跳过 `keyframe_required` / `keyframe_not_anchored` / `end_frame_required`，但仍要求 canon 和上一镜视频；出片时服务端自动选参考图——第一镜用 canon 用户图，后续镜用上一镜 `video_last_frame_asset_id`，保证身份和剪辑点，不额外生成关键帧。
 
 用户提供的图可以**直接**成为 canon（`origin=uploaded`），不需要重新生成一版设定图。产品用 `anchorType=product`，角色用 `character`；角色锚在没有产品 canon 时会同时写入 `canon_asset_id`，否则角色视频会被 `canon_required` 卡死。
 

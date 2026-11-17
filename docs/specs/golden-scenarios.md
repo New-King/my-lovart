@@ -301,6 +301,7 @@
 ## G44 多镜头 + 用户参考图
 
 - 上下文：用户给角色/产品参考图，要 10 秒 2 镜
-- 期望：建 kind=video 分镜；`register_reference` 把用户图登记为 canon；关键帧以它为参考；不另生成角色设定图
+- 期望：建 kind=video 分镜并设 `referenceDirect=true`；`register_reference` 把用户图登记为 canon；逐镜直接拿参考图出片，第一镜用 canon，第二镜用上一镜实际末帧；不生成关键帧/角色设定图
+- 例外：两镜角度差异极大、单张参考约束不住，或需要精确构图时，才关掉 referenceDirect 生成 keyframe
 - 禁止：忽略用户图、重新生成一版 canon；角色锚没有写入 `canon_asset_id` 导致 `canon_required`
-- 验收：`verify:video-guard` 34/34（角色 canon 用例）
+- 验收：`verify:video-guard` 35/35（角色 canon + referenceDirect 用例）

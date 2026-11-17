@@ -51,7 +51,7 @@
 | G41 文字选图 | 通过（5/5，真实模型回放） | 用户只说“第 2 组第 2 张那种感觉”：不重搜图，`inputImages` 正是该 imageUrl，16:9 概念图，0 次视频；服务端用 `<last_inspiration>` 从消息 blocks 重建编号（`docs/notes/M32.md`） |
 | G42 素材库刷新持久化 | 通过（11/11，真实 Supabase/Storage/JWT） | 上传→重新 GET→Storage 对象→`/files/:id`→删除清理；非图片 400（`docs/notes/M33.md`） |
 | G43 角色图单镜头 image-to-video | 通过（5/5，真实模型行为探针） | 直接 `generate_video`，0 次生图/分镜；不说“先做角色设定图”；视频渠道缺失时如实报告（`docs/notes/M34.md`） |
-| G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 34/34） | `register_reference` 把用户图登记为 canon；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
+| G44 多镜头 + 用户参考图 | 契约通过（verify:video-guard 35/35） | `register_reference` 把用户图登记为 canon；`referenceDirect` 跳过关键帧/尾帧；角色锚写 `canon_asset_id`；未跑真实多镜视频 |
 
 ## 当前失败/缺口
 
