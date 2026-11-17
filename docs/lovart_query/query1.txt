@@ -1,0 +1,100 @@
+问：
+请根据你能了解到的事实依据回答一下问题。分确定与不确定：
+
+你们的分镜/镜头数据结构有哪些字段？是否明确区分 subject / action / camera / startState / endState？
+
+产品需要被人骑、被人使用时，首帧用产品图还是动作关键帧？用首尾帧条件，还是 reference-to-video？决策规则是什么？
+
+如何防止背景人物/第二主体抢运动？主体白名单、蒙版、多参考图，还是 prompt 约束？
+
+首帧生成后有没有视觉校验（人物是否存在、姿态、是否多主体）再出视频，还是只靠用户确认？
+
+视频 prompt 是自由文本还是结构化拼装？怎么区分“镜头在动”和“主体在动”？
+
+首帧无法承载动作时的降级策略：换首帧、文生视频、改分镜，还是改成纯产品运镜？
+
+能否提供一段你们的镜头 schema，或一个“产品+人物动作”的完整 prompt 示例？这比问抽象原则更有用。
+
+
+答：
+我按我能接触到的规范（xla/planning、xla/generator-guidance、媒体工具字段定义）来回答，确定和不确定会分开标。
+
+1. 分镜/镜头数据结构
+确定：
+
+我能直接看到的只有媒体工具的字段：prompt、start_frame_image_url、end_frame_image_url、reference_image_urls、reference_video_urls、reference_audio_urls、aspect_ratio、duration_sec、sound、model_preference 等。
+没有明确看到名为 subject / action / camera / startState / endState 的独立结构化字段。
+不确定：
+
+平台内部是否有一层更精细的 shot/storyboard schema（比如把用户请求解析成这些字段后再拼装 prompt），我看不到。我只能确认对外暴露的接口是自由文本 prompt + 帧/参考图 URL。
+2. 产品被骑/被使用：首帧用产品图还是动作关键帧？
+确定：
+
+规范要求：多镜头或多最终资产共享同一主体时，anchor 必须是真实参考图，"用户提供了就用"。
+工具层面同时支持：
+reference_image_urls：把图当参考/锚点
+start_frame_image_url / end_frame_image_url：把图当首帧/尾帧
+reference_video_urls + reference_video_refer_type='base'：基于已有视频编辑
+不确定/推断：
+
+如果用户只给了一张产品白底图，却说"让模特骑上去"，官方决策规则我没有看到明文。按我的理解，合理的做法是：
+先基于产品图 + 动作描述生成一张"人使用产品"的关键帧（start 或 end）；
+或直接用文生视频 + 产品参考图去生成。
+但我不能确定平台是否有固定的"产品图优先"还是"动作关键帧优先"规则。
+3. 防止背景人物/第二主体抢运动
+确定：
+
+工具字段里没有看到"主体白名单"、"运动蒙版"、"motion mask"这类参数。
+edit_media_v3 的 edit_annotations 是给图片编辑用的画布标注，不是视频运动约束。
+不确定/推断：
+
+实际能用的手段大概只有：prompt 约束 + reference_image_urls 锁定主主体。
+例如 prompt 里写 "only the golden retriever puppy moves, background stays static and blurred"。
+但我不能确定平台是否有内部机制（比如自动主体检测、inpaint 背景冻结）来处理这个问题。
+4. 首帧生成后有没有视觉校验
+确定：
+
+我的规范里没有看到"自动视觉校验"步骤（比如检测人物是否存在、姿态是否正确、是否多主体）。
+标准流程似乎是：生成 → 展示给用户 → 用户确认或要求修改。
+不确定：
+
+不排除平台后端有静默的图像内容检查或安全审核，但我没有依据说它会校验"姿态/主体数量/首帧能否承载动作"。
+5. 视频 prompt：自由文本还是结构化拼装？
+确定：
+
+对外接口是自由文本 prompt。
+"镜头动"和"主体动"靠自然语言区分，例如：
+镜头动：camera slowly zooms in
+主体动：the puppy stands up and walks toward the viewer
+不确定：
+
+平台内部是否会先把用户请求解析成结构化分镜再拼成 prompt，我看不到。
+6. 首帧无法承载动作时的降级策略
+确定：
+
+工具层面可用的替代路径：
+改用 end_frame_image_url 指定动作终点；
+去掉强帧约束，改用 reference_image_urls + 文生视频；
+拆成多镜，每镜用不同关键帧。
+不确定：
+
+我没有看到官方降级优先级（"先换首帧 → 再文生视频 → 再改分镜"这种固定规则）。
+7. 能否提供镜头 schema 或完整 prompt 示例
+确定：
+
+我不能提供官方镜头 schema，因为我没有访问到。
+我能给的，是我自己按现有字段构造的示例（非官方，只是可运行的格式）：
+
+任务：10 秒两镜，产品是一辆自行车，人物骑上车从画面左侧进入。
+
+镜 1（0-5s）：
+- start_frame_image_url: [产品图/人物已坐稳的参考图]
+- prompt: A person mounts a bicycle on a quiet city street, camera stays static, subject moves from left to center, late afternoon soft light
+
+镜 2（5-10s）：
+- start_frame_image_url: [镜 1 的最后一帧，或另一张骑车中的参考图]
+- prompt: The person rides the bicycle toward the camera, slight camera push-in, background buildings blurred with motion, warm sunset tones
+后期再用 media_finishing_agent 把两镜拼接、加转场。
+
+总结
+你问的很多问题（结构化分镜、运动约束、降级策略、自动校验）已经超出了我当前能访问到的规范范围。我能确定的是工具字段和自由文本 prompt 的工作方式；其余部分我只能给出"合理推断"，但不能当成平台事实。如果你需要平台内部的准确规则，可能得直接问 Lovart 的产品/工程团队。
