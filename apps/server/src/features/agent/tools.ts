@@ -452,6 +452,8 @@ type ImageReferencePlan = {
   policy?: ConsistencyPolicy;
   /** 分镜锁定的画幅；关键帧/锚图必须跟随，不能各自默认 3:4 */
   aspectRatio?: string;
+  /** 这一帧要求人物/骑手完成动作：身份锁不能把参考图的静止姿态一起锁死 */
+  actionSubject?: boolean;
   /** 非阻断提示，例如“没有实拍，已按文字生成设定图” */
   warning?: string;
   error?: Record<string, unknown>;
@@ -739,6 +741,10 @@ export async function planImageReferences(
     found.shot.prompt,
     input.prompt,
   ].join(" ");
+  const actionSubject =
+    (role === "keyframe" || role === "end_frame") &&
+    promptRequiresHumanAction(stateText) &&
+    promptMentionsActor(stateText);
   if (role === "keyframe") {
     const actionError = actionActorError(stateText);
     if (actionError) {
@@ -878,6 +884,7 @@ export async function planImageReferences(
     storyboardId: board.id,
     policy,
     ...(board.aspectRatio ? { aspectRatio: board.aspectRatio } : {}),
+    ...(actionSubject ? { actionSubject: true } : {}),
     ...(shotDirection ? { shotDirection } : {}),
   };
 }
@@ -1169,7 +1176,9 @@ export function createAgentTools(context: ToolContext) {
         const sourceAssetIds = plan.sourceAssetIds;
         const identityLock =
           role === "keyframe" || role === "end_frame"
-            ? "严格保持参考图主体的身份一致：形状、比例、接口/瓶盖结构、材质、颜色、标志位置，不要重新设计主体；只允许改变机位、光线、背景与构图。"
+            ? plan.actionSubject
+              ? "严格保持参考图主体的身份：形状、比例、接口/瓶盖结构、材质、颜色、标志位置不要重新设计；但不要复制参考图的棚拍构图和静止姿态。按文字重新构图，把执行动作的骑手/人物和动作姿态画进画面，只锁身份，不锁姿势。"
+              : "严格保持参考图主体的身份一致：形状、比例、接口/瓶盖结构、材质、颜色、标志位置，不要重新设计主体；只允许改变机位、光线、背景与构图。"
             : "";
         const prompt = [input.prompt, identityLock, plan.shotDirection]
           .filter(Boolean)

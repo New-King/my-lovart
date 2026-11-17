@@ -57,7 +57,7 @@
 | G47 图片快捷加入对话 + 搜图失败可见 | 部分通过 | 搜图失败探针 5/5；所有聊天图片左上角快捷入口已实现，待浏览器手测（`docs/notes/M37.md`） |
 | G48 过程区显示模型思考 | 通过（6/6 契约 + 9/9 真模型） | `reasoning_content` 按模型回合切成 Thought，一行摘要可展开；真模型（deepseek-v4-pro）思考在工具前且持久化；无 reasoning 的模型自动不显示（`docs/notes/M38.md`） |
 | G49 对话 Markdown 排版 | 待手测 | 单换行硬换行、表格滚动/边框/内边距已实现；`ChatMarkdown` 统一入口；浏览器按 T11 点测（`docs/notes/M39.md`） |
-| G50 动作镜头主体 | 通过（6/6 纯函数 + 40/40 视频闸门） | 压弯/骑行/驶入无主体返回 `action_actor_required`；`direct=true` 不绕过；纯产品运镜不误伤（`docs/notes/M40.md`） |
+| G50 动作镜头主体 | 通过（6/6 纯函数 + 40/40 视频闸门） | 压弯/骑行/驶入无主体返回 `action_actor_required`；`direct=true` 不绕过；纯产品运镜不误伤；动作帧 `actionSubject=true` 时身份锁不冻结姿势（`docs/notes/M40.md`） |
 
 ## 当前失败/缺口
 

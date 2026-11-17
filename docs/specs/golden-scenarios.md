@@ -349,6 +349,7 @@
 
 - 上下文：公路车广告第 1 镜要求“压弯逼近”，但产品 canon 是无人物棚拍图，首帧里前景是静止车、远处另一个骑手
 - 期望：`generate_image(role=keyframe)` 在 prompt 出现压弯/骑行/驶入等动作但没有骑手/人物时返回 `action_actor_required`；视频 prompt 同样检查，`direct=true` 不能绕过
+- 期望：动作镜头的身份锁只锁车型/材质/配色，不锁棚拍静止姿态；`planImageReferences` 返回 `actionSubject=true`，允许按文字重新构图并加入骑手动作
 - 期望：改法只有两种——首帧写清“骑手压低身体压弯”并包含该人物与姿态，或改成环绕/推近/光影扫过等纯产品运镜
 - 禁止：拿无人物产品设定图直接当动作首帧；视频 prompt 写“从画面深处驶来”去动背景里的另一个骑手；输出把主角变成路人
 - 验收：`verify:action-guard` 6/6；`verify:video-guard` 增加关键帧与视频两条用例（T12）

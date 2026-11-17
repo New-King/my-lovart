@@ -395,8 +395,8 @@ try {
   });
   check(
     "写清骑手和压弯姿态后放行关键帧",
-    !actionWithActor.error,
-    actionWithActor.error?.code ?? "allowed",
+    !actionWithActor.error && actionWithActor.actionSubject === true,
+    `${actionWithActor.error?.code ?? "allowed"} / actionSubject=${actionWithActor.actionSubject ?? false}`,
   );
 
   const detailId = randomUUID();
